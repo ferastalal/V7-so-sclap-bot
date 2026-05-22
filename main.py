@@ -110,3 +110,4 @@ while True:
             print(stock, e)
 
     time.sleep(60)
+print("BOT STARTED")
