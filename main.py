@@ -14,10 +14,6 @@ WATCHLIST = [
     "NVDA",
     "AMD",
     "AVGO",
-    "META",
-    # ENERGY / OIL
-    "OXY",
-    "SLB",
     # CLEAN ENERGY
     "BE",
 ]
