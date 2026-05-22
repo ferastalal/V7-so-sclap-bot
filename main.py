@@ -15,19 +15,9 @@ WATCHLIST = [
     "AMD",
     "AVGO",
     "META",
-    "AMZN",
-    "NFLX",
-    "SMCI",
     # ENERGY / OIL
-    "XOM",
-    "CVX",
     "OXY",
     "SLB",
-    # METALS / MINING
-    "RIO",
-    "BHP",
-    "FCX",
-    "NEM",
     # CLEAN ENERGY
     "BE",
 ]
