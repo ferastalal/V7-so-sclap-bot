@@ -95,5 +95,5 @@ while True:
         except Exception as e:
             print(stock, e)
 
-    time.sleep(60)
+    time.sleep(10)
 print("BOT STARTED")
