@@ -30,16 +30,7 @@ last_heartbeat = time.time()
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
-        requests.get(
-            url,
-            params={
-                "chat_id": CHAT_ID,
-                "text": msg
-            },
-            timeout=10
-        )
-
+        requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except:
         pass
 
@@ -52,12 +43,10 @@ def market_open():
         return False
 
     current = now.strftime("%H:%M")
-
     return "09:30" <= current <= "15:55"
 
 
 def download(stock, period, interval):
-
     return yf.download(
         stock,
         period=period,
@@ -68,21 +57,16 @@ def download(stock, period, interval):
 
 
 def vwap(df):
-
     high = df["High"].squeeze()
     low = df["Low"].squeeze()
     close = df["Close"].squeeze()
     volume = df["Volume"].squeeze()
-
     typical = (high + low + close) / 3
-
     return float((typical * volume).sum() / volume.sum())
 
 
 def market_strength():
-
     try:
-
         spy = download("SPY", "2d", "5m")
         qqq = download("QQQ", "2d", "5m")
 
@@ -92,25 +76,11 @@ def market_strength():
         spy_close = spy["Close"].squeeze()
         qqq_close = qqq["Close"].squeeze()
 
-        spy_ema9 = ta.trend.EMAIndicator(
-            spy_close,
-            window=9
-        ).ema_indicator().iloc[-1]
+        spy_ema9 = ta.trend.EMAIndicator(spy_close, window=9).ema_indicator().iloc[-1]
+        spy_ema21 = ta.trend.EMAIndicator(spy_close, window=21).ema_indicator().iloc[-1]
 
-        spy_ema21 = ta.trend.EMAIndicator(
-            spy_close,
-            window=21
-        ).ema_indicator().iloc[-1]
-
-        qqq_ema9 = ta.trend.EMAIndicator(
-            qqq_close,
-            window=9
-        ).ema_indicator().iloc[-1]
-
-        qqq_ema21 = ta.trend.EMAIndicator(
-            qqq_close,
-            window=21
-        ).ema_indicator().iloc[-1]
+        qqq_ema9 = ta.trend.EMAIndicator(qqq_close, window=9).ema_indicator().iloc[-1]
+        qqq_ema21 = ta.trend.EMAIndicator(qqq_close, window=21).ema_indicator().iloc[-1]
 
         if spy_ema9 < spy_ema21:
             return False, "SPY ضعيف"
@@ -125,19 +95,12 @@ def market_strength():
 
 
 def analyze(stock):
-
     try:
-
         df1 = download(stock, "2d", "1m")
         df5 = download(stock, "5d", "5m")
         df15 = download(stock, "10d", "15m")
 
-        if (
-            df1.empty
-            or df5.empty
-            or df15.empty
-            or len(df1) < 80
-        ):
+        if df1.empty or df5.empty or df15.empty or len(df1) < 80:
             return None
 
         close1 = df1["Close"].squeeze()
@@ -150,58 +113,24 @@ def analyze(stock):
 
         price = float(close1.iloc[-1])
 
-        ema9_1 = ta.trend.EMAIndicator(
-            close1,
-            window=9
-        ).ema_indicator().iloc[-1]
+        ema9_1 = ta.trend.EMAIndicator(close1, window=9).ema_indicator().iloc[-1]
+        ema21_1 = ta.trend.EMAIndicator(close1, window=21).ema_indicator().iloc[-1]
+        ema50_1 = ta.trend.EMAIndicator(close1, window=50).ema_indicator().iloc[-1]
 
-        ema21_1 = ta.trend.EMAIndicator(
-            close1,
-            window=21
-        ).ema_indicator().iloc[-1]
+        ema9_5 = ta.trend.EMAIndicator(close5, window=9).ema_indicator().iloc[-1]
+        ema21_5 = ta.trend.EMAIndicator(close5, window=21).ema_indicator().iloc[-1]
 
-        ema50_1 = ta.trend.EMAIndicator(
-            close1,
-            window=50
-        ).ema_indicator().iloc[-1]
+        ema9_15 = ta.trend.EMAIndicator(close15, window=9).ema_indicator().iloc[-1]
+        ema21_15 = ta.trend.EMAIndicator(close15, window=21).ema_indicator().iloc[-1]
 
-        ema9_5 = ta.trend.EMAIndicator(
-            close5,
-            window=9
-        ).ema_indicator().iloc[-1]
-
-        ema21_5 = ta.trend.EMAIndicator(
-            close5,
-            window=21
-        ).ema_indicator().iloc[-1]
-
-        ema9_15 = ta.trend.EMAIndicator(
-            close15,
-            window=9
-        ).ema_indicator().iloc[-1]
-
-        ema21_15 = ta.trend.EMAIndicator(
-            close15,
-            window=21
-        ).ema_indicator().iloc[-1]
-
-        rsi1 = ta.momentum.RSIIndicator(
-            close1,
-            window=14
-        ).rsi().iloc[-1]
-
-        rsi5 = ta.momentum.RSIIndicator(
-            close5,
-            window=14
-        ).rsi().iloc[-1]
+        rsi1 = ta.momentum.RSIIndicator(close1, window=14).rsi().iloc[-1]
+        rsi5 = ta.momentum.RSIIndicator(close5, window=14).rsi().iloc[-1]
 
         macd1 = ta.trend.MACD(close1)
-
         macd1_now = macd1.macd().iloc[-1]
         macd1_signal = macd1.macd_signal().iloc[-1]
 
         macd5 = ta.trend.MACD(close5)
-
         macd5_now = macd5.macd().iloc[-1]
         macd5_signal = macd5.macd_signal().iloc[-1]
 
@@ -223,31 +152,20 @@ def analyze(stock):
 
         vol_now = float(volume1.iloc[-1])
         vol_avg = float(volume1.tail(30).mean())
-
         relative_volume = vol_now / vol_avg
-
         dollar_volume = price * vol_now
 
-        recent_move_5m = (
-            price - float(close1.iloc[-6])
-        ) / float(close1.iloc[-6])
-
-        recent_move_15m = (
-            price - float(close1.iloc[-16])
-        ) / float(close1.iloc[-16])
+        recent_move_5m = (price - float(close1.iloc[-6])) / float(close1.iloc[-6])
+        recent_move_15m = (price - float(close1.iloc[-16])) / float(close1.iloc[-16])
 
         vwap_value = vwap(df1.tail(60))
-
-        vwap_distance = (
-            price - vwap_value
-        ) / vwap_value
+        vwap_distance = (price - vwap_value) / vwap_value
 
         market_ok, market_reason = market_strength()
 
         if not market_ok:
             return None
 
-        # منع المطاردة
         if recent_move_5m > 0.004:
             return None
 
@@ -263,7 +181,6 @@ def analyze(stock):
         score = 0
         reasons = []
 
-        # اتجاه السوق
         if price > ema9_1 > ema21_1:
             score += 20
             reasons.append("ترند 1m صاعد")
@@ -280,7 +197,6 @@ def analyze(stock):
             score += 10
             reasons.append("السعر فوق EMA50")
 
-        # RSI
         if 45 <= rsi1 <= 60:
             score += 15
             reasons.append(f"RSI ممتاز {rsi1:.1f}")
@@ -289,7 +205,6 @@ def analyze(stock):
             score += 10
             reasons.append(f"RSI 5m داعم {rsi5:.1f}")
 
-        # MACD
         if macd1_now > macd1_signal:
             score += 15
             reasons.append("MACD 1m إيجابي")
@@ -298,16 +213,13 @@ def analyze(stock):
             score += 15
             reasons.append("MACD 5m إيجابي")
 
-        # ADX
         if adx >= 20:
             score += 15
             reasons.append(f"ADX قوي {adx:.1f}")
 
-        # سيولة
         if relative_volume >= 1.5:
             score += 20
             reasons.append("سيولة قوية جدًا")
-
         elif relative_volume >= 1.2:
             score += 10
             reasons.append("سيولة جيدة")
@@ -316,17 +228,14 @@ def analyze(stock):
             score += 10
             reasons.append("Dollar Volume ممتاز")
 
-        # VWAP
         if -0.001 <= vwap_distance <= 0.003:
             score += 15
             reasons.append("قريب من VWAP")
 
-        # زخم مبكر
         if 0 <= recent_move_5m <= 0.004:
             score += 15
             reasons.append("بداية زخم")
 
-        # ATR
         if 0.002 <= atr_pct <= 0.012:
             score += 10
             reasons.append("تذبذب صحي")
@@ -358,46 +267,36 @@ send(
     "تحليل احترافي + منع المطاردة + سيولة + VWAP + ADX"
 )
 
-while True:
+send("✅ BOT WORKING 100%")
 
+while True:
     try:
+        saudi = pytz.timezone("Asia/Riyadh")
+        now_ksa = datetime.now(saudi).strftime("%H:%M:%S")
+
+        if time.time() - last_heartbeat >= 3600:
+            send(
+                f"👀 V30 STOCK BOT STILL RUNNING\n"
+                f"⏰ KSA: {now_ksa}\n"
+                f"📡 البوت حي ويراقب النظام"
+            )
+            last_heartbeat = time.time()
 
         if not market_open():
             time.sleep(60)
             continue
 
-        saudi = pytz.timezone("Asia/Riyadh")
-
-        now_ksa = datetime.now(saudi).strftime("%H:%M:%S")
-
-        # تنبيه كل ساعة
-        if time.time() - last_heartbeat >= 3600:
-
-            send(
-                "👀 V30 STOCK BOT شغال 100%\n"
-                "يراقب السوق الأمريكي الآن"
-            )
-
-            last_heartbeat = time.time()
-
         for stock in WATCHLIST:
-
             result = analyze(stock)
 
             if not result:
                 continue
 
             score = result["score"]
-
             now_time = time.time()
-
             last_time = last_alert_time.get(stock, 0)
 
-            if (
-                score >= MIN_SCORE
-                and now_time - last_time >= ALERT_COOLDOWN
-            ):
-
+            if score >= MIN_SCORE and now_time - last_time >= ALERT_COOLDOWN:
                 msg = f"""
 🟢🚀 V30 STOCK ALERT 🚀🟢
 
@@ -433,15 +332,11 @@ while True:
 """
 
                 send(msg)
-
                 print(msg)
-
                 last_alert_time[stock] = now_time
 
         time.sleep(CHECK_SECONDS)
 
     except Exception as e:
-
         print("ERROR:", e)
-
         time.sleep(30)
