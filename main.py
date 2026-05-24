@@ -39,7 +39,7 @@ def send(msg):
         print("TELEGRAM RESPONSE:", r.text)
     except Exception as e:
         print("TELEGRAM ERROR:", e)
-
+send("✅ TEST TELEGRAM FROM V30")
 
 def market_open():
     ny = pytz.timezone("America/New_York")
