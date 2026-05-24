@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 import pytz
 
-TOKEN = "8897393036:AAGDVoXd_UuNjDKNN5KUP1DCpBxtoGWUUHM"
+TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
 CHAT_ID = "1016589957"
 
 WATCHLIST = [
