@@ -35,11 +35,15 @@ def send(msg):
             params={"chat_id": CHAT_ID, "text": msg},
             timeout=10
         )
-        print("TELEGRAM STATUS:", r.status_code)
-        print("TELEGRAM RESPONSE:", r.text)
+        print("TELEGRAM STATUS:", r.status_code, flush=True)
+        print("TELEGRAM RESPONSE:", r.text, flush=True)
     except Exception as e:
-        print("TELEGRAM ERROR:", e)
-send("✅ TEST TELEGRAM FROM V30")
+        print("TELEGRAM ERROR:", e, flush=True)
+
+
+print("BOT FILE STARTED", flush=True)
+send("✅ STOCK BOT STARTED TEST")
+
 
 def market_open():
     ny = pytz.timezone("America/New_York")
@@ -67,6 +71,7 @@ def vwap(df):
     low = df["Low"].squeeze()
     close = df["Close"].squeeze()
     volume = df["Volume"].squeeze()
+
     typical = (high + low + close) / 3
     return float((typical * volume).sum() / volume.sum())
 
@@ -96,7 +101,8 @@ def market_strength():
 
         return True, "السوق ممتاز"
 
-    except:
+    except Exception as e:
+        print("MARKET ERROR:", e, flush=True)
         return False, "تعذر فحص السوق"
 
 
@@ -158,6 +164,10 @@ def analyze(stock):
 
         vol_now = float(volume1.iloc[-1])
         vol_avg = float(volume1.tail(30).mean())
+
+        if vol_avg <= 0:
+            return None
+
         relative_volume = vol_now / vol_avg
         dollar_volume = price * vol_now
 
@@ -172,6 +182,7 @@ def analyze(stock):
         if not market_ok:
             return None
 
+        # منع المطاردة
         if recent_move_5m > 0.004:
             return None
 
@@ -261,10 +272,12 @@ def analyze(stock):
             "rsi5": rsi5,
             "adx": adx,
             "relative_volume": relative_volume,
-            "atr_pct": atr_pct
+            "atr_pct": atr_pct,
+            "vwap_distance": vwap_distance
         }
 
-    except:
+    except Exception as e:
+        print(f"ANALYZE ERROR {stock}:", e, flush=True)
         return None
 
 
@@ -272,8 +285,6 @@ send(
     "🚀 V30 STOCK SCALP BOT ONLINE 🚀\n"
     "تحليل احترافي + منع المطاردة + سيولة + VWAP + ADX"
 )
-
-send("✅ BOT WORKING 100%")
 
 while True:
     try:
@@ -289,6 +300,7 @@ while True:
             last_heartbeat = time.time()
 
         if not market_open():
+            print("MARKET CLOSED - BOT ALIVE", now_ksa, flush=True)
             time.sleep(60)
             continue
 
@@ -330,6 +342,7 @@ while True:
 - ADX: {result['adx']:.1f}
 - Relative Volume: {result['relative_volume']:.2f}x
 - ATR: {result['atr_pct']*100:.2f}%
+- VWAP Distance: {result['vwap_distance']*100:.2f}%
 
 ✅ أسباب الدخول:
 {chr(10).join(['- ' + r for r in result['reasons']])}
@@ -338,11 +351,11 @@ while True:
 """
 
                 send(msg)
-                print(msg)
+                print(msg, flush=True)
                 last_alert_time[stock] = now_time
 
         time.sleep(CHECK_SECONDS)
 
     except Exception as e:
-        print("ERROR:", e)
+        print("ERROR:", e, flush=True)
         time.sleep(30)
