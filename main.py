@@ -30,9 +30,15 @@ last_heartbeat = time.time()
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except:
-        pass
+        r = requests.get(
+            url,
+            params={"chat_id": CHAT_ID, "text": msg},
+            timeout=10
+        )
+        print("TELEGRAM STATUS:", r.status_code)
+        print("TELEGRAM RESPONSE:", r.text)
+    except Exception as e:
+        print("TELEGRAM ERROR:", e)
 
 
 def market_open():
