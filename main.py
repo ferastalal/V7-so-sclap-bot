@@ -2,6 +2,7 @@ import yfinance as yf
 import ta
 import requests
 import time
+import gc
 from datetime import datetime
 import pytz
 
@@ -23,6 +24,9 @@ TARGET_MIN = 0.004
 TARGET_MAX = 0.010
 STOP_LOSS = 0.003
 
+MAX_HISTORY_BARS = 300
+OPENING_BLOCK_MINUTES = 5
+
 last_alert_time = {}
 last_heartbeat = time.time()
 
@@ -37,7 +41,7 @@ def send(msg):
 
 
 print("BOT FILE STARTED", flush=True)
-print("SERVICE READY" , flush=True)
+print("SERVICE READY", flush=True)
 send("✅ V31 STOCK EARLY ALERT BOT STARTED")
 
 
@@ -50,8 +54,21 @@ def market_open():
     return "09:30" <= current <= "15:55"
 
 
+def first_5_minutes_after_open():
+    ny = pytz.timezone("America/New_York")
+    now = datetime.now(ny)
+
+    if now.weekday() >= 5:
+        return False
+
+    open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    block_end = now.replace(hour=9, minute=30 + OPENING_BLOCK_MINUTES, second=0, microsecond=0)
+
+    return open_time <= now < block_end
+
+
 def download(stock, period, interval):
-    return yf.download(
+    df = yf.download(
         stock,
         period=period,
         interval=interval,
@@ -59,14 +76,59 @@ def download(stock, period, interval):
         auto_adjust=True
     )
 
+    if df is not None and not df.empty:
+        df = df.tail(MAX_HISTORY_BARS).copy()
+
+    return df
+
 
 def vwap(df):
     high = df["High"].squeeze()
     low = df["Low"].squeeze()
     close = df["Close"].squeeze()
     volume = df["Volume"].squeeze()
+
+    if volume.sum() <= 0:
+        return float(close.iloc[-1])
+
     typical = (high + low + close) / 3
     return float((typical * volume).sum() / volume.sum())
+
+
+def assistant_scalp_view(price, high1, low1, close1, vwap_value, vwap_distance, move_1m, move_3m, move_5m, rsi1):
+    resistance = float(high1.tail(12).max())
+    support = float(low1.tail(12).min())
+    recent_low = float(low1.tail(8).min())
+
+    entry = resistance * 1.0005
+    stop = min(support, recent_low) * 0.998
+
+    target1 = entry * 1.006
+    target2 = entry * 1.010
+
+    if move_5m > 0.020 or vwap_distance > 0.018 or rsi1 > 82:
+        status = "قوي لكن لا تطارد"
+        advice = "انتظر Pullback أو اختراق جديد بعد تهدئة."
+    elif price >= entry:
+        status = "اختراق فعلي"
+        advice = "دخول سكالب محتمل، لكن التزم بالوقف."
+    elif price > vwap_value and price >= support:
+        status = "راقب الاختراق"
+        advice = f"الدخول الأفضل فوق {entry:.2f} فقط."
+    else:
+        status = "انتظار"
+        advice = "الزخم غير مؤكد، لا تدخل الآن."
+
+    return {
+        "status": status,
+        "entry": entry,
+        "target1": target1,
+        "target2": target2,
+        "stop": stop,
+        "support": support,
+        "resistance": resistance,
+        "advice": advice
+    }
 
 
 def market_move():
@@ -84,6 +146,9 @@ def market_move():
         qqq_move = (float(qqq_close.iloc[-1]) - float(qqq_close.iloc[-6])) / float(qqq_close.iloc[-6])
 
         avg_move = (spy_move + qqq_move) / 2
+
+        del spy, qqq, spy_close, qqq_close
+        gc.collect()
 
         if avg_move > 0:
             return avg_move, "السوق داعم"
@@ -170,20 +235,31 @@ def analyze(stock):
         spy_move, market_reason = market_move()
         relative_strength = move_5m - spy_move
 
-        # منع المطاردة فقط إذا طار كثير
-        if move_5m > 0.012:
+        assistant_view = assistant_scalp_view(
+            price, high1, low1, close1,
+            vwap_value, vwap_distance,
+            move_1m, move_3m, move_5m, rsi1
+        )
+
+        # فلتر منع المطاردة الخفيف
+        if move_1m > 0.012:
             return None
 
-        if move_15m > 0.025:
+        if move_5m > 0.020:
             return None
 
-        if rsi1 > 78:
+        if move_15m > 0.040:
+            return None
+
+        if vwap_distance > 0.018:
+            return None
+
+        if rsi1 > 82:
             return None
 
         score = 0
         reasons = []
 
-        # علامات مبكرة قبل الانفجار
         if near_breakout:
             score += 20
             reasons.append("قريب من كسر قمة آخر 20 شمعة")
@@ -270,17 +346,21 @@ def analyze(stock):
             "move_1m": move_1m,
             "move_3m": move_3m,
             "move_5m": move_5m,
-            "relative_strength": relative_strength
+            "relative_strength": relative_strength,
+            "assistant_view": assistant_view
         }
 
     except Exception as e:
         print(f"ANALYZE ERROR {stock}:", e, flush=True)
         return None
 
+    finally:
+        gc.collect()
+
 
 send(
     "🚀 V31 STOCK EARLY SCANNER ONLINE 🚀\n"
-    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength"
+    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength + Assistant Scalp View"
 )
 
 while True:
@@ -299,17 +379,26 @@ while True:
         if not market_open():
             print("MARKET CLOSED - BOT ALIVE", now_ksa, flush=True)
             time.sleep(15)
+            gc.collect()
+            continue
+
+        if first_5_minutes_after_open():
+            print("⏳ أول 5 دقائق من الافتتاح - تجاهل التنبيهات", now_ksa, flush=True)
+            time.sleep(15)
+            gc.collect()
             continue
 
         for stock in WATCHLIST:
             result = analyze(stock)
 
             if not result:
+                gc.collect()
                 continue
 
             score = result["score"]
             now_time = time.time()
             last_time = last_alert_time.get(stock, 0)
+            av = result["assistant_view"]
 
             if score >= EARLY_SCORE and now_time - last_time >= ALERT_COOLDOWN:
                 if result["alert_type"] == "STRONG":
@@ -358,6 +447,17 @@ while True:
 ✅ أسباب التنبيه:
 {chr(10).join(['- ' + r for r in result['reasons']])}
 
+🧠 رأي مساعد السكالب:
+- الحالة: {av['status']}
+- الدعم القريب: {av['support']:.2f}
+- المقاومة القريبة: {av['resistance']:.2f}
+- الدخول الأفضل: فوق {av['entry']:.2f}
+- الهدف الأول: {av['target1']:.2f}
+- الهدف الثاني: {av['target2']:.2f}
+- وقف السكالب: {av['stop']:.2f}
+- الخطة: إذا وصل الهدف الأول بيع نصف الكمية وارفع الوقف لسعر الدخول.
+- ملاحظة: {av['advice']}
+
 ⚠️ تنبيه فقط، القرار النهائي عليك.
 """
 
@@ -365,8 +465,12 @@ while True:
                 print(msg, flush=True)
                 last_alert_time[stock] = now_time
 
+            del result
+            gc.collect()
+
         time.sleep(CHECK_SECONDS)
 
     except Exception as e:
         print("ERROR:", e, flush=True)
+        gc.collect()
         time.sleep(30)
