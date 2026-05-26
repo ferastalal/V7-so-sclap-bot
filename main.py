@@ -1,4 +1,4 @@
-import yfinance as yf
+mport yfinance as yf
 import ta
 import requests
 import time
@@ -14,14 +14,15 @@ WATCHLIST = [
     "META", "AMZN", "AAPL", "MSFT"
 ]
 
-CHECK_SECONDS = 20
-ALERT_COOLDOWN = 1800
+CHECK_SECONDS = 15
+ALERT_COOLDOWN = 900
 
-MIN_SCORE = 100
+EARLY_SCORE = 55
+STRONG_SCORE = 80
 
-TARGET_MIN = 0.005
+TARGET_MIN = 0.004
 TARGET_MAX = 0.010
-STOP_LOSS = 0.002
+STOP_LOSS = 0.003
 
 last_alert_time = {}
 last_heartbeat = time.time()
@@ -30,28 +31,21 @@ last_heartbeat = time.time()
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        r = requests.get(
-            url,
-            params={"chat_id": CHAT_ID, "text": msg},
-            timeout=10
-        )
+        r = requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
         print("TELEGRAM STATUS:", r.status_code, flush=True)
-        print("TELEGRAM RESPONSE:", r.text, flush=True)
     except Exception as e:
         print("TELEGRAM ERROR:", e, flush=True)
 
 
 print("BOT FILE STARTED", flush=True)
-send("✅ STOCK BOT STARTED TEST")
+send("✅ V31 STOCK EARLY ALERT BOT STARTED")
 
 
 def market_open():
     ny = pytz.timezone("America/New_York")
     now = datetime.now(ny)
-
     if now.weekday() >= 5:
         return False
-
     current = now.strftime("%H:%M")
     return "09:30" <= current <= "15:55"
 
@@ -71,39 +65,34 @@ def vwap(df):
     low = df["Low"].squeeze()
     close = df["Close"].squeeze()
     volume = df["Volume"].squeeze()
-
     typical = (high + low + close) / 3
     return float((typical * volume).sum() / volume.sum())
 
 
-def market_strength():
+def market_move():
     try:
-        spy = download("SPY", "2d", "5m")
-        qqq = download("QQQ", "2d", "5m")
+        spy = download("SPY", "1d", "1m")
+        qqq = download("QQQ", "1d", "1m")
 
-        if spy.empty or qqq.empty:
-            return False, "السوق العام ضعيف"
+        if spy.empty or qqq.empty or len(spy) < 30 or len(qqq) < 30:
+            return 0, "السوق غير واضح"
 
         spy_close = spy["Close"].squeeze()
         qqq_close = qqq["Close"].squeeze()
 
-        spy_ema9 = ta.trend.EMAIndicator(spy_close, window=9).ema_indicator().iloc[-1]
-        spy_ema21 = ta.trend.EMAIndicator(spy_close, window=21).ema_indicator().iloc[-1]
+        spy_move = (float(spy_close.iloc[-1]) - float(spy_close.iloc[-6])) / float(spy_close.iloc[-6])
+        qqq_move = (float(qqq_close.iloc[-1]) - float(qqq_close.iloc[-6])) / float(qqq_close.iloc[-6])
 
-        qqq_ema9 = ta.trend.EMAIndicator(qqq_close, window=9).ema_indicator().iloc[-1]
-        qqq_ema21 = ta.trend.EMAIndicator(qqq_close, window=21).ema_indicator().iloc[-1]
+        avg_move = (spy_move + qqq_move) / 2
 
-        if spy_ema9 < spy_ema21:
-            return False, "SPY ضعيف"
-
-        if qqq_ema9 < qqq_ema21:
-            return False, "QQQ ضعيف"
-
-        return True, "السوق ممتاز"
+        if avg_move > 0:
+            return avg_move, "السوق داعم"
+        else:
+            return avg_move, "السوق ضعيف شوي"
 
     except Exception as e:
-        print("MARKET ERROR:", e, flush=True)
-        return False, "تعذر فحص السوق"
+        print("MARKET MOVE ERROR:", e, flush=True)
+        return 0, "تعذر فحص السوق"
 
 
 def analyze(stock):
@@ -142,10 +131,6 @@ def analyze(stock):
         macd1_now = macd1.macd().iloc[-1]
         macd1_signal = macd1.macd_signal().iloc[-1]
 
-        macd5 = ta.trend.MACD(close5)
-        macd5_now = macd5.macd().iloc[-1]
-        macd5_signal = macd5.macd_signal().iloc[-1]
-
         adx = ta.trend.ADXIndicator(
             high=high1,
             low=low1,
@@ -171,98 +156,106 @@ def analyze(stock):
         relative_volume = vol_now / vol_avg
         dollar_volume = price * vol_now
 
-        recent_move_5m = (price - float(close1.iloc[-6])) / float(close1.iloc[-6])
-        recent_move_15m = (price - float(close1.iloc[-16])) / float(close1.iloc[-16])
+        move_1m = (price - float(close1.iloc[-2])) / float(close1.iloc[-2])
+        move_3m = (price - float(close1.iloc[-4])) / float(close1.iloc[-4])
+        move_5m = (price - float(close1.iloc[-6])) / float(close1.iloc[-6])
+        move_15m = (price - float(close1.iloc[-16])) / float(close1.iloc[-16])
+
+        high_20 = float(high1.tail(20).max())
+        near_breakout = price >= high_20 * 0.997
 
         vwap_value = vwap(df1.tail(60))
         vwap_distance = (price - vwap_value) / vwap_value
 
-        market_ok, market_reason = market_strength()
+        spy_move, market_reason = market_move()
+        relative_strength = move_5m - spy_move
 
-        if not market_ok:
+        # منع المطاردة فقط إذا طار كثير
+        if move_5m > 0.012:
             return None
 
-        # منع المطاردة
-        if recent_move_5m > 0.004:
+        if move_15m > 0.025:
             return None
 
-        if recent_move_15m > 0.010:
-            return None
-
-        if rsi1 > 63:
-            return None
-
-        if vwap_distance > 0.003:
+        if rsi1 > 78:
             return None
 
         score = 0
         reasons = []
 
-        if price > ema9_1 > ema21_1:
+        # علامات مبكرة قبل الانفجار
+        if near_breakout:
             score += 20
+            reasons.append("قريب من كسر قمة آخر 20 شمعة")
+
+        if 45 <= rsi1 <= 68:
+            score += 15
+            reasons.append(f"RSI يجهز {rsi1:.1f}")
+
+        if macd1_now > macd1_signal:
+            score += 15
+            reasons.append("MACD بدأ يعطي إيجابية")
+
+        if price > vwap_value and -0.002 <= vwap_distance <= 0.006:
+            score += 15
+            reasons.append("فوق VWAP وقريب منه")
+
+        if relative_volume >= 1.1:
+            score += 15
+            reasons.append(f"فوليوم بدأ يزيد {relative_volume:.2f}x")
+
+        if relative_volume >= 1.5:
+            score += 15
+            reasons.append("فوليوم سبايك قوي")
+
+        if price > ema9_1 > ema21_1:
+            score += 15
             reasons.append("ترند 1m صاعد")
 
         if ema9_5 > ema21_5:
-            score += 20
-            reasons.append("ترند 5m صاعد")
+            score += 10
+            reasons.append("ترند 5m داعم")
 
         if ema9_15 > ema21_15:
-            score += 15
+            score += 10
             reasons.append("ترند 15m داعم")
 
         if price > ema50_1:
             score += 10
-            reasons.append("السعر فوق EMA50")
+            reasons.append("فوق EMA50")
 
-        if 45 <= rsi1 <= 60:
+        if relative_strength > 0.001:
             score += 15
-            reasons.append(f"RSI ممتاز {rsi1:.1f}")
+            reasons.append("أقوى من السوق SPY/QQQ")
 
-        if 48 <= rsi5 <= 65:
+        if 0.0005 <= move_3m <= 0.006:
+            score += 15
+            reasons.append("زخم مبكر آخر 3 دقائق")
+
+        if 0 <= move_5m <= 0.010:
             score += 10
-            reasons.append(f"RSI 5m داعم {rsi5:.1f}")
+            reasons.append("حركة صحية بدون مطاردة")
 
-        if macd1_now > macd1_signal:
-            score += 15
-            reasons.append("MACD 1m إيجابي")
-
-        if macd5_now > macd5_signal:
-            score += 15
-            reasons.append("MACD 5m إيجابي")
-
-        if adx >= 20:
-            score += 15
-            reasons.append(f"ADX قوي {adx:.1f}")
-
-        if relative_volume >= 1.5:
-            score += 20
-            reasons.append("سيولة قوية جدًا")
-        elif relative_volume >= 1.2:
+        if adx >= 16:
             score += 10
-            reasons.append("سيولة جيدة")
+            reasons.append(f"ADX جيد {adx:.1f}")
 
-        if dollar_volume > 1000000:
+        if dollar_volume > 500000:
             score += 10
-            reasons.append("Dollar Volume ممتاز")
+            reasons.append("Dollar Volume مقبول")
 
-        if -0.001 <= vwap_distance <= 0.003:
-            score += 15
-            reasons.append("قريب من VWAP")
-
-        if 0 <= recent_move_5m <= 0.004:
-            score += 15
-            reasons.append("بداية زخم")
-
-        if 0.002 <= atr_pct <= 0.012:
+        if 0.0015 <= atr_pct <= 0.018:
             score += 10
-            reasons.append("تذبذب صحي")
+            reasons.append("تذبذب مناسب للسكالب")
 
-        target_pct = TARGET_MAX if score >= 120 else TARGET_MIN
+        alert_type = "EARLY" if score < STRONG_SCORE else "STRONG"
+        target_pct = TARGET_MAX if score >= STRONG_SCORE else TARGET_MIN
 
         return {
             "stock": stock,
             "price": price,
             "score": score,
+            "alert_type": alert_type,
             "target": price * (1 + target_pct),
             "stop": price * (1 - STOP_LOSS),
             "target_pct": target_pct,
@@ -273,7 +266,11 @@ def analyze(stock):
             "adx": adx,
             "relative_volume": relative_volume,
             "atr_pct": atr_pct,
-            "vwap_distance": vwap_distance
+            "vwap_distance": vwap_distance,
+            "move_1m": move_1m,
+            "move_3m": move_3m,
+            "move_5m": move_5m,
+            "relative_strength": relative_strength
         }
 
     except Exception as e:
@@ -282,8 +279,8 @@ def analyze(stock):
 
 
 send(
-    "🚀 V30 STOCK SCALP BOT ONLINE 🚀\n"
-    "تحليل احترافي + منع المطاردة + سيولة + VWAP + ADX"
+    "🚀 V31 STOCK EARLY SCANNER ONLINE 🚀\n"
+    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength"
 )
 
 while True:
@@ -293,9 +290,9 @@ while True:
 
         if time.time() - last_heartbeat >= 3600:
             send(
-                f"👀 V30 STOCK BOT STILL RUNNING\n"
+                f"👀 V31 STOCK BOT STILL RUNNING\n"
                 f"⏰ KSA: {now_ksa}\n"
-                f"📡 البوت حي ويراقب النظام"
+                f"📡 البوت حي ويراقب الأسهم"
             )
             last_heartbeat = time.time()
 
@@ -314,28 +311,38 @@ while True:
             now_time = time.time()
             last_time = last_alert_time.get(stock, 0)
 
-            if score >= MIN_SCORE and now_time - last_time >= ALERT_COOLDOWN:
+            if score >= EARLY_SCORE and now_time - last_time >= ALERT_COOLDOWN:
+                if result["alert_type"] == "STRONG":
+                    title = "🔥🚀 V31 STRONG STOCK ALERT 🚀🔥"
+                    note = "فرصة قوية الآن"
+                else:
+                    title = "👀⚡ V31 EARLY STOCK ALERT ⚡👀"
+                    note = "تنبيه مبكر قبل الانفجار المحتمل"
+
                 msg = f"""
-🟢🚀 V30 STOCK ALERT 🚀🟢
+{title}
 
 📈 السهم: {stock}
 ⏰ الوقت KSA: {now_ksa}
 
-💰 الدخول: {result['price']:.2f}
+💰 السعر الحالي:
+{result['price']:.2f}
 
-🎯 الهدف:
+🎯 الهدف المتوقع:
 {result['target']:.2f}
 ({result['target_pct']*100:.2f}%)
 
-🛑 وقف الخسارة:
+🛑 وقف المتابعة:
 {result['stop']:.2f}
 ({STOP_LOSS*100:.2f}%)
 
-🔥 قوة التوصية:
+🔥 السكور:
 {score}/100
 
-📊 التحليل:
+📌 النوع:
+{note}
 
+📊 التحليل:
 - {result['market_reason']}
 - RSI 1m: {result['rsi1']:.1f}
 - RSI 5m: {result['rsi5']:.1f}
@@ -343,8 +350,12 @@ while True:
 - Relative Volume: {result['relative_volume']:.2f}x
 - ATR: {result['atr_pct']*100:.2f}%
 - VWAP Distance: {result['vwap_distance']*100:.2f}%
+- Move 1m: {result['move_1m']*100:.2f}%
+- Move 3m: {result['move_3m']*100:.2f}%
+- Move 5m: {result['move_5m']*100:.2f}%
+- Relative Strength: {result['relative_strength']*100:.2f}%
 
-✅ أسباب الدخول:
+✅ أسباب التنبيه:
 {chr(10).join(['- ' + r for r in result['reasons']])}
 
 ⚠️ تنبيه فقط، القرار النهائي عليك.
