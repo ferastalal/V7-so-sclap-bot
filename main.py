@@ -10,7 +10,6 @@ CHAT_ID = "1016589957"
 
 WATCHLIST = [
     "TSLA", "NVDA", "AMD", "AVGO", "BE",
-    "PLTR", "SMCI", "MARA", "COIN", "ARM",
     "META", "AMZN", "AAPL", "MSFT"
 ]
 
