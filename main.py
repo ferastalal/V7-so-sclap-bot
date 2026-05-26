@@ -1,4 +1,4 @@
-mport yfinance as yf
+import yfinance as yf
 import ta
 import requests
 import time
