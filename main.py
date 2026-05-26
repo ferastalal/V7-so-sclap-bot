@@ -38,6 +38,7 @@ def send(msg):
 
 
 print("BOT FILE STARTED", flush=True)
+print("SERVICE READY" , flush=True)
 send("✅ V31 STOCK EARLY ALERT BOT STARTED")
 
 
@@ -298,7 +299,7 @@ while True:
 
         if not market_open():
             print("MARKET CLOSED - BOT ALIVE", now_ksa, flush=True)
-            time.sleep(60)
+            time.sleep(15)
             continue
 
         for stock in WATCHLIST:
