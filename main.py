@@ -31,6 +31,77 @@ last_alert_time = {}
 last_heartbeat = time.time()
 
 
+# =========================
+# FLEXIBLE QUALITY FILTER
+# =========================
+def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_volume, adx, atr_pct, vwap_distance, rsi1, rsi5):
+    real_score = 0
+    warnings = []
+
+    if move_1m > 0.0008:
+        real_score += 1
+    else:
+        warnings.append("Move 1m ضعيف أو سلبي")
+
+    if move_3m > 0.002:
+        real_score += 1
+    else:
+        warnings.append("Move 3m ضعيف")
+
+    if move_5m > 0.0035:
+        real_score += 1
+    else:
+        warnings.append("Move 5m ضعيف")
+
+    if relative_strength > 0.0015:
+        real_score += 1
+    else:
+        warnings.append("القوة النسبية ضعيفة")
+
+    if relative_volume >= 0.8:
+        real_score += 1
+    else:
+        warnings.append("الفوليوم ضعيف")
+
+    if adx >= 25:
+        real_score += 1
+    else:
+        warnings.append("ADX ضعيف")
+
+    if 0.0015 <= atr_pct <= 0.006:
+        real_score += 1
+    else:
+        warnings.append("ATR غير مثالي")
+
+    if 0.001 <= vwap_distance <= 0.012:
+        real_score += 1
+    else:
+        warnings.append("البعد عن VWAP غير مثالي")
+
+    if 55 <= rsi5 <= 70:
+        real_score += 1
+    else:
+        warnings.append("RSI 5m غير مثالي")
+
+    aggressive_momentum = (
+        adx >= 35
+        and move_5m > 0.004
+        and relative_strength > 0.003
+    )
+
+    golden_setup = real_score >= 6 or aggressive_momentum
+    good_setup = real_score >= 4 or aggressive_momentum
+
+    if golden_setup:
+        quality_label = "🔥 GOLDEN SETUP"
+    elif good_setup:
+        quality_label = "✅ GOOD SETUP"
+    else:
+        quality_label = "⚠️ WEAK / WATCH ONLY"
+
+    return real_score, golden_setup, good_setup, aggressive_momentum, quality_label, warnings
+
+
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -229,6 +300,45 @@ def analyze(stock):
         high_20 = float(high1.tail(20).max())
         near_breakout = price >= high_20 * 0.997
 
+        breakout_level = high_20
+
+        last_close = float(close1.iloc[-1])
+        prev_close = float(close1.iloc[-2])
+        last_high = float(high1.iloc[-1])
+        last_low = float(low1.iloc[-1])
+
+        candle_range = max(last_high - last_low, 0.0001)
+        upper_wick = last_high - max(last_close, prev_close)
+        wick_ratio = upper_wick / candle_range
+
+        breakout_failed = (
+            last_high > breakout_level * 1.001
+            and last_close < breakout_level
+        )
+
+        fast_rejection = (
+            move_1m < -0.002
+        )
+
+        weak_breakout_volume = (
+            near_breakout and relative_volume < 1.15
+        )
+
+        fake_breakout_wick = (
+            near_breakout and wick_ratio > 0.45
+        )
+
+        liquidity_grab_detected = (
+            breakout_failed
+            or fast_rejection
+            or weak_breakout_volume
+            or fake_breakout_wick
+        )
+
+        if liquidity_grab_detected:
+            print(f"{stock}: LIQUIDITY GRAB FILTERED", flush=True)
+            return None
+
         vwap_value = vwap(df1.tail(60))
         vwap_distance = (price - vwap_value) / vwap_value
 
@@ -241,7 +351,13 @@ def analyze(stock):
             move_1m, move_3m, move_5m, rsi1
         )
 
-        # فلتر منع المطاردة الخفيف
+        real_score, golden_setup, good_setup, aggressive_momentum, quality_label, quality_warnings = real_quality_filter(
+            move_1m, move_3m, move_5m,
+            relative_strength, relative_volume,
+            adx, atr_pct, vwap_distance,
+            rsi1, rsi5
+        )
+
         if move_1m > 0.012:
             return None
 
@@ -263,6 +379,10 @@ def analyze(stock):
         if near_breakout:
             score += 20
             reasons.append("قريب من كسر قمة آخر 20 شمعة")
+
+        if not liquidity_grab_detected:
+            score += 10
+            reasons.append("الاختراق يبدو حقيقي وليس Liquidity Grab")
 
         if 45 <= rsi1 <= 68:
             score += 15
@@ -347,7 +467,13 @@ def analyze(stock):
             "move_3m": move_3m,
             "move_5m": move_5m,
             "relative_strength": relative_strength,
-            "assistant_view": assistant_view
+            "assistant_view": assistant_view,
+            "real_score": real_score,
+            "golden_setup": golden_setup,
+            "good_setup": good_setup,
+            "aggressive_momentum": aggressive_momentum,
+            "quality_label": quality_label,
+            "quality_warnings": quality_warnings
         }
 
     except Exception as e:
@@ -360,7 +486,7 @@ def analyze(stock):
 
 send(
     "🚀 V31 STOCK EARLY SCANNER ONLINE 🚀\n"
-    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength + Assistant Scalp View"
+    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength + Assistant Scalp View + Liquidity Grab Filter + Flexible Quality Filter"
 )
 
 while True:
@@ -408,6 +534,12 @@ while True:
                     title = "👀⚡ V31 EARLY STOCK ALERT ⚡👀"
                     note = "تنبيه مبكر قبل الانفجار المحتمل"
 
+                quality_warnings_text = (
+                    chr(10).join(["- " + w for w in result["quality_warnings"]])
+                    if result["quality_warnings"]
+                    else "- القيم ممتازة"
+                )
+
                 msg = f"""
 {title}
 
@@ -431,6 +563,15 @@ while True:
 📌 النوع:
 {note}
 
+🏆 جودة الفرصة:
+{result['quality_label']}
+
+📊 Real Quality Score:
+{result['real_score']}/9
+
+🚀 Aggressive Momentum:
+{'YES 🔥' if result['aggressive_momentum'] else 'NO'}
+
 📊 التحليل:
 - {result['market_reason']}
 - RSI 1m: {result['rsi1']:.1f}
@@ -443,6 +584,9 @@ while True:
 - Move 3m: {result['move_3m']*100:.2f}%
 - Move 5m: {result['move_5m']*100:.2f}%
 - Relative Strength: {result['relative_strength']*100:.2f}%
+
+⚠️ ملاحظات الجودة:
+{quality_warnings_text}
 
 ✅ أسباب التنبيه:
 {chr(10).join(['- ' + r for r in result['reasons']])}
