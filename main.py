@@ -1,21 +1,23 @@
-import yfinance as yf
-import ta
-import requests
+import os
 import time
 import gc
-from datetime import datetime
+import requests
+import pandas as pd
+import ta
+from datetime import datetime, timedelta
 import pytz
 
 TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
 CHAT_ID = "1016589957"
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 
 WATCHLIST = [
     "TSLA", "NVDA", "AMD", "AVGO", "BE",
     "META", "AMZN", "AAPL", "MSFT"
 ]
 
-CHECK_SECONDS = 15
-ALERT_COOLDOWN = 1800  # 30 دقيقة بدل 5 دقائق
+CHECK_SECONDS = 30
+ALERT_COOLDOWN = 1800
 
 MIN_SEND_SCORE = 110
 MIN_REAL_SCORE_TO_SEND = 5
@@ -24,12 +26,132 @@ TARGET_MID = 0.008
 TARGET_MAX = 0.010
 STOP_LOSS = 0.003
 
-MAX_HISTORY_BARS = 300
+MAX_HISTORY_BARS = 180
 OPENING_BLOCK_MINUTES = 5
 
 last_alert_time = {}
 last_alert_snapshot = {}
 last_heartbeat = time.time()
+
+
+def send(msg):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        r = requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        print("TELEGRAM STATUS:", r.status_code, flush=True)
+    except Exception as e:
+        print("TELEGRAM ERROR:", e, flush=True)
+
+
+def market_open():
+    ny = pytz.timezone("America/New_York")
+    now = datetime.now(ny)
+    if now.weekday() >= 5:
+        return False
+    current = now.strftime("%H:%M")
+    return "09:30" <= current <= "15:55"
+
+
+def first_5_minutes_after_open():
+    ny = pytz.timezone("America/New_York")
+    now = datetime.now(ny)
+
+    if now.weekday() >= 5:
+        return False
+
+    open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    block_end = open_time + timedelta(minutes=OPENING_BLOCK_MINUTES)
+
+    return open_time <= now < block_end
+
+
+def download(stock, period, interval):
+    try:
+        if not MASSIVE_API_KEY:
+            print("MASSIVE_API_KEY NOT FOUND", flush=True)
+            return pd.DataFrame()
+
+        ny = pytz.timezone("America/New_York")
+        now = datetime.now(ny)
+
+        if interval == "1m":
+            multiplier = 1
+            timespan = "minute"
+            days_back = 3
+        elif interval == "5m":
+            multiplier = 5
+            timespan = "minute"
+            days_back = 7
+        elif interval == "15m":
+            multiplier = 15
+            timespan = "minute"
+            days_back = 14
+        else:
+            multiplier = 1
+            timespan = "minute"
+            days_back = 3
+
+        date_to = now.strftime("%Y-%m-%d")
+        date_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%d")
+
+        url = (
+            f"https://api.massive.com/v2/aggs/ticker/{stock}/range/"
+            f"{multiplier}/{timespan}/{date_from}/{date_to}"
+        )
+
+        params = {
+            "adjusted": "true",
+            "sort": "asc",
+            "limit": 5000,
+            "apiKey": MASSIVE_API_KEY
+        }
+
+        r = requests.get(url, params=params, timeout=12)
+
+        if r.status_code != 200:
+            print(f"MASSIVE ERROR {stock} {interval}: {r.status_code} {r.text[:160]}", flush=True)
+            return pd.DataFrame()
+
+        data = r.json()
+        results = data.get("results", [])
+
+        if not results:
+            print(f"MASSIVE EMPTY {stock} {interval}", flush=True)
+            return pd.DataFrame()
+
+        rows = []
+        for x in results:
+            rows.append({
+                "Datetime": pd.to_datetime(x.get("t"), unit="ms", utc=True),
+                "Open": float(x.get("o", 0)),
+                "High": float(x.get("h", 0)),
+                "Low": float(x.get("l", 0)),
+                "Close": float(x.get("c", 0)),
+                "Volume": float(x.get("v", 0))
+            })
+
+        df = pd.DataFrame(rows)
+        df = df.set_index("Datetime")
+        df = df.tail(MAX_HISTORY_BARS).copy()
+
+        return df
+
+    except Exception as e:
+        print(f"MASSIVE DOWNLOAD ERROR {stock} {interval}:", e, flush=True)
+        return pd.DataFrame()
+
+
+def vwap(df):
+    high = df["High"].squeeze()
+    low = df["Low"].squeeze()
+    close = df["Close"].squeeze()
+    volume = df["Volume"].squeeze()
+
+    if volume.sum() <= 0:
+        return float(close.iloc[-1])
+
+    typical = (high + low + close) / 3
+    return float((typical * volume).sum() / volume.sum())
 
 
 def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_volume, adx, atr_pct, vwap_distance, rsi1, rsi5):
@@ -87,6 +209,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_v
         and move_5m > 0.0035
         and relative_strength > 0.002
         and vwap_distance > 0
+        and relative_volume >= 0.8
     )
 
     golden_setup = real_score >= 7 or aggressive_momentum
@@ -100,62 +223,6 @@ def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_v
         quality_label = "⚠️ WEAK / WATCH ONLY"
 
     return real_score, golden_setup, good_setup, aggressive_momentum, quality_label, warnings
-
-
-def send(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        r = requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-        print("TELEGRAM STATUS:", r.status_code, flush=True)
-    except Exception as e:
-        print("TELEGRAM ERROR:", e, flush=True)
-
-
-print("BOT FILE STARTED", flush=True)
-print("SERVICE READY", flush=True)
-send("✅ V33 QUALITY ONLY STOCK BOT STARTED")
-
-
-def market_open():
-    ny = pytz.timezone("America/New_York")
-    now = datetime.now(ny)
-    if now.weekday() >= 5:
-        return False
-    current = now.strftime("%H:%M")
-    return "09:30" <= current <= "15:55"
-
-
-def first_5_minutes_after_open():
-    ny = pytz.timezone("America/New_York")
-    now = datetime.now(ny)
-
-    if now.weekday() >= 5:
-        return False
-
-    open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
-    block_end = now.replace(hour=9, minute=30 + OPENING_BLOCK_MINUTES, second=0, microsecond=0)
-
-    return open_time <= now < block_end
-
-
-def download(stock, period, interval):
-    df = yf.download(stock, period=period, interval=interval, progress=False, auto_adjust=True)
-    if df is not None and not df.empty:
-        df = df.tail(MAX_HISTORY_BARS).copy()
-    return df
-
-
-def vwap(df):
-    high = df["High"].squeeze()
-    low = df["Low"].squeeze()
-    close = df["Close"].squeeze()
-    volume = df["Volume"].squeeze()
-
-    if volume.sum() <= 0:
-        return float(close.iloc[-1])
-
-    typical = (high + low + close) / 3
-    return float((typical * volume).sum() / volume.sum())
 
 
 def assistant_scalp_view(price, high1, low1, close1, vwap_value, vwap_distance, move_1m, move_3m, move_5m, rsi1):
@@ -209,6 +276,9 @@ def market_move():
         qqq_move = (float(qqq_close.iloc[-1]) - float(qqq_close.iloc[-6])) / float(qqq_close.iloc[-6])
 
         avg_move = (spy_move + qqq_move) / 2
+
+        del spy, qqq, spy_close, qqq_close
+        gc.collect()
 
         if avg_move > 0:
             return avg_move, "السوق داعم"
@@ -264,11 +334,11 @@ def analyze(stock):
         vol_now = float(volume1.iloc[-1])
         vol_avg = float(volume1.tail(30).mean())
 
-        if vol_avg <= 0:
-            relative_volume = 0
-        else:
-            relative_volume = vol_now / vol_avg
+        if vol_now <= 0 or vol_avg <= 0:
+            print(f"{stock}: SKIPPED - BAD VOLUME DATA", flush=True)
+            return None
 
+        relative_volume = vol_now / vol_avg
         dollar_volume = price * vol_now
 
         move_1m = (price - float(close1.iloc[-2])) / float(close1.iloc[-2])
@@ -411,6 +481,7 @@ def analyze(stock):
             and move_3m > 0.0015
             and relative_strength > 0.001
             and 45 <= rsi1 <= 75
+            and relative_volume >= 0.9
         ) or aggressive_momentum
 
         if momentum_beast:
@@ -422,7 +493,7 @@ def analyze(stock):
         else:
             target_pct = TARGET_MID
 
-        return {
+        result = {
             "stock": stock,
             "price": price,
             "score": score,
@@ -451,6 +522,10 @@ def analyze(stock):
             "quality_warnings": quality_warnings
         }
 
+        del df1, df5, df15
+        gc.collect()
+        return result
+
     except Exception as e:
         print(f"ANALYZE ERROR {stock}:", e, flush=True)
         return None
@@ -459,12 +534,18 @@ def analyze(stock):
         gc.collect()
 
 
+print("BOT FILE STARTED", flush=True)
+print("SERVICE READY", flush=True)
+send("✅ V34 MASSIVE STOCK BOT STARTED - yfinance removed")
+
+
 send(
-    "🚀 V33 QUALITY ONLY STOCK SCANNER ONLINE 🚀\n"
-    "✅ No Early Alerts\n"
+    "🚀 V34 MASSIVE QUALITY STOCK SCANNER ONLINE 🚀\n"
+    "✅ Massive data source\n"
+    "✅ yfinance removed\n"
+    "✅ Volume protection enabled\n"
     "✅ Good + Golden setups only\n"
-    "✅ 30 Min cooldown\n"
-    "✅ Less spam, cleaner alerts"
+    "✅ 30 Min cooldown"
 )
 
 while True:
@@ -474,7 +555,7 @@ while True:
 
         if time.time() - last_heartbeat >= 3600:
             send(
-                f"👀 V33 STOCK BOT STILL RUNNING\n"
+                f"👀 V34 STOCK BOT STILL RUNNING\n"
                 f"⏰ KSA: {now_ksa}\n"
                 f"📡 البوت حي ويراقب الأسهم"
             )
@@ -482,13 +563,13 @@ while True:
 
         if not market_open():
             print("MARKET CLOSED - BOT ALIVE", now_ksa, flush=True)
-            time.sleep(15)
+            time.sleep(30)
             gc.collect()
             continue
 
         if first_5_minutes_after_open():
             print("⏳ أول 5 دقائق من الافتتاح - تجاهل التنبيهات", now_ksa, flush=True)
-            time.sleep(15)
+            time.sleep(30)
             gc.collect()
             continue
 
@@ -504,21 +585,28 @@ while True:
             last_time = last_alert_time.get(stock, 0)
             av = result["assistant_view"]
 
-            # فلتر الجودة الأساسي: لا EARLY نهائيًا
             if not result["good_setup"]:
                 print(f"{stock}: SKIPPED - NOT GOOD SETUP", flush=True)
+                del result
+                gc.collect()
                 continue
 
             if result["real_score"] < MIN_REAL_SCORE_TO_SEND:
                 print(f"{stock}: SKIPPED - REAL SCORE LOW {result['real_score']}/9", flush=True)
+                del result
+                gc.collect()
                 continue
 
             if score < MIN_SEND_SCORE:
                 print(f"{stock}: SKIPPED - SCORE LOW {score}", flush=True)
+                del result
+                gc.collect()
                 continue
 
             if av["status"] == "انتظار":
                 print(f"{stock}: SKIPPED - ASSISTANT SAYS WAIT", flush=True)
+                del result
+                gc.collect()
                 continue
 
             normal_cooldown_ok = now_time - last_time >= ALERT_COOLDOWN
@@ -528,7 +616,6 @@ while True:
             last_real_score = snapshot.get("real_score", 0)
             last_golden = snapshot.get("golden", False)
 
-            # إعادة تنبيه نادرة فقط إذا صار تحسن قوي جدًا
             elite_upgrade = (
                 result["golden_setup"]
                 and not last_golden
@@ -542,7 +629,7 @@ while True:
             )
 
             if normal_cooldown_ok or elite_upgrade or big_price_continuation:
-                title = "🔥🚀 V33 GOLDEN STOCK ALERT 🚀🔥" if result["golden_setup"] else "✅🚀 V33 GOOD STOCK ALERT 🚀✅"
+                title = "🔥🚀 V34 GOLDEN STOCK ALERT 🚀🔥" if result["golden_setup"] else "✅🚀 V34 GOOD STOCK ALERT 🚀✅"
                 note = "فرصة ذهبية عالية الجودة" if result["golden_setup"] else "فرصة جيدة بجودة مقبولة"
 
                 quality_warnings_text = (
