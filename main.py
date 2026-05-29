@@ -1,15 +1,14 @@
-import os
+import yfinance as yf
+import ta
+import requests
 import time
 import gc
-import requests
 import pandas as pd
-import ta
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
 CHAT_ID = "1016589957"
-MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 
 WATCHLIST = [
     "TSLA", "NVDA", "AMD", "AVGO", "BE",
@@ -33,6 +32,11 @@ last_alert_time = {}
 last_alert_snapshot = {}
 last_heartbeat = time.time()
 
+market_cache = {
+    "time": 0,
+    "value": (0, "السوق غير واضح")
+}
+
 
 def send(msg):
     try:
@@ -41,6 +45,11 @@ def send(msg):
         print("TELEGRAM STATUS:", r.status_code, flush=True)
     except Exception as e:
         print("TELEGRAM ERROR:", e, flush=True)
+
+
+print("BOT FILE STARTED", flush=True)
+print("SERVICE READY", flush=True)
+send("✅ V34 YAHOO STOCK BOT STARTED - Massive removed")
 
 
 def market_open():
@@ -60,84 +69,43 @@ def first_5_minutes_after_open():
         return False
 
     open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
-    block_end = open_time + timedelta(minutes=OPENING_BLOCK_MINUTES)
+    block_end = now.replace(hour=9, minute=30 + OPENING_BLOCK_MINUTES, second=0, microsecond=0)
 
     return open_time <= now < block_end
 
 
+def clean_yf_columns(df, stock):
+    try:
+        if isinstance(df.columns, pd.MultiIndex):
+            if stock in df.columns.get_level_values(-1):
+                df = df.xs(stock, axis=1, level=-1)
+            else:
+                df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception:
+        return df
+
+
 def download(stock, period, interval):
     try:
-        if not MASSIVE_API_KEY:
-            print("MASSIVE_API_KEY NOT FOUND", flush=True)
-            return pd.DataFrame()
-
-        ny = pytz.timezone("America/New_York")
-        now = datetime.now(ny)
-
-        if interval == "1m":
-            multiplier = 1
-            timespan = "minute"
-            days_back = 3
-        elif interval == "5m":
-            multiplier = 5
-            timespan = "minute"
-            days_back = 7
-        elif interval == "15m":
-            multiplier = 15
-            timespan = "minute"
-            days_back = 14
-        else:
-            multiplier = 1
-            timespan = "minute"
-            days_back = 3
-
-        date_to = now.strftime("%Y-%m-%d")
-        date_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%d")
-
-        url = (
-            f"https://api.massive.com/v2/aggs/ticker/{stock}/range/"
-            f"{multiplier}/{timespan}/{date_from}/{date_to}"
+        df = yf.download(
+            stock,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=True,
+            threads=False
         )
 
-        params = {
-            "adjusted": "true",
-            "sort": "asc",
-            "limit": 5000,
-            "apiKey": MASSIVE_API_KEY
-        }
+        df = clean_yf_columns(df, stock)
 
-        r = requests.get(url, params=params, timeout=12)
-
-        if r.status_code != 200:
-            print(f"MASSIVE ERROR {stock} {interval}: {r.status_code} {r.text[:160]}", flush=True)
-            return pd.DataFrame()
-
-        data = r.json()
-        results = data.get("results", [])
-
-        if not results:
-            print(f"MASSIVE EMPTY {stock} {interval}", flush=True)
-            return pd.DataFrame()
-
-        rows = []
-        for x in results:
-            rows.append({
-                "Datetime": pd.to_datetime(x.get("t"), unit="ms", utc=True),
-                "Open": float(x.get("o", 0)),
-                "High": float(x.get("h", 0)),
-                "Low": float(x.get("l", 0)),
-                "Close": float(x.get("c", 0)),
-                "Volume": float(x.get("v", 0))
-            })
-
-        df = pd.DataFrame(rows)
-        df = df.set_index("Datetime")
-        df = df.tail(MAX_HISTORY_BARS).copy()
+        if df is not None and not df.empty:
+            df = df.tail(MAX_HISTORY_BARS).copy()
 
         return df
 
     except Exception as e:
-        print(f"MASSIVE DOWNLOAD ERROR {stock} {interval}:", e, flush=True)
+        print(f"YAHOO DOWNLOAD ERROR {stock} {interval}:", e, flush=True)
         return pd.DataFrame()
 
 
@@ -209,7 +177,6 @@ def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_v
         and move_5m > 0.0035
         and relative_strength > 0.002
         and vwap_distance > 0
-        and relative_volume >= 0.8
     )
 
     golden_setup = real_score >= 7 or aggressive_momentum
@@ -263,11 +230,18 @@ def assistant_scalp_view(price, high1, low1, close1, vwap_value, vwap_distance, 
 
 def market_move():
     try:
+        now_time = time.time()
+
+        if now_time - market_cache["time"] < 60:
+            return market_cache["value"]
+
         spy = download("SPY", "1d", "1m")
         qqq = download("QQQ", "1d", "1m")
 
         if spy.empty or qqq.empty or len(spy) < 30 or len(qqq) < 30:
-            return 0, "السوق غير واضح"
+            market_cache["value"] = (0, "السوق غير واضح")
+            market_cache["time"] = now_time
+            return market_cache["value"]
 
         spy_close = spy["Close"].squeeze()
         qqq_close = qqq["Close"].squeeze()
@@ -277,13 +251,18 @@ def market_move():
 
         avg_move = (spy_move + qqq_move) / 2
 
+        if avg_move > 0:
+            value = (avg_move, "السوق داعم")
+        else:
+            value = (avg_move, "السوق ضعيف شوي")
+
+        market_cache["value"] = value
+        market_cache["time"] = now_time
+
         del spy, qqq, spy_close, qqq_close
         gc.collect()
 
-        if avg_move > 0:
-            return avg_move, "السوق داعم"
-        else:
-            return avg_move, "السوق ضعيف شوي"
+        return value
 
     except Exception as e:
         print("MARKET MOVE ERROR:", e, flush=True)
@@ -334,11 +313,11 @@ def analyze(stock):
         vol_now = float(volume1.iloc[-1])
         vol_avg = float(volume1.tail(30).mean())
 
-        if vol_now <= 0 or vol_avg <= 0:
-            print(f"{stock}: SKIPPED - BAD VOLUME DATA", flush=True)
-            return None
+        if vol_avg <= 0:
+            relative_volume = 0
+        else:
+            relative_volume = vol_now / vol_avg
 
-        relative_volume = vol_now / vol_avg
         dollar_volume = price * vol_now
 
         move_1m = (price - float(close1.iloc[-2])) / float(close1.iloc[-2])
@@ -481,7 +460,6 @@ def analyze(stock):
             and move_3m > 0.0015
             and relative_strength > 0.001
             and 45 <= rsi1 <= 75
-            and relative_volume >= 0.9
         ) or aggressive_momentum
 
         if momentum_beast:
@@ -534,18 +512,13 @@ def analyze(stock):
         gc.collect()
 
 
-print("BOT FILE STARTED", flush=True)
-print("SERVICE READY", flush=True)
-send("✅ V34 MASSIVE STOCK BOT STARTED - yfinance removed")
-
-
 send(
-    "🚀 V34 MASSIVE QUALITY STOCK SCANNER ONLINE 🚀\n"
-    "✅ Massive data source\n"
-    "✅ yfinance removed\n"
-    "✅ Volume protection enabled\n"
+    "🚀 V34 YAHOO QUALITY STOCK SCANNER ONLINE 🚀\n"
+    "✅ Yahoo/yfinance data source\n"
+    "✅ Massive removed\n"
     "✅ Good + Golden setups only\n"
-    "✅ 30 Min cooldown"
+    "✅ 30 Min cooldown\n"
+    "✅ Market cache enabled"
 )
 
 while True:
