@@ -15,12 +15,13 @@ WATCHLIST = [
 ]
 
 CHECK_SECONDS = 15
-ALERT_COOLDOWN = 900
+ALERT_COOLDOWN = 300  # 5 دقائق
 
 EARLY_SCORE = 55
 STRONG_SCORE = 80
 
-TARGET_MIN = 0.004
+TARGET_MIN = 0.006
+TARGET_MID = 0.008
 TARGET_MAX = 0.010
 STOP_LOSS = 0.003
 
@@ -28,6 +29,7 @@ MAX_HISTORY_BARS = 300
 OPENING_BLOCK_MINUTES = 5
 
 last_alert_time = {}
+last_alert_snapshot = {}
 last_heartbeat = time.time()
 
 
@@ -78,15 +80,15 @@ def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_v
     else:
         warnings.append("البعد عن VWAP غير مثالي")
 
-    if 55 <= rsi5 <= 70:
+    if 55 <= rsi5 <= 72:
         real_score += 1
     else:
         warnings.append("RSI 5m غير مثالي")
 
     aggressive_momentum = (
-        adx >= 35
-        and move_5m > 0.004
-        and relative_strength > 0.003
+        adx >= 32
+        and move_5m > 0.0035
+        and relative_strength > 0.002
     )
 
     golden_setup = real_score >= 6 or aggressive_momentum
@@ -113,7 +115,7 @@ def send(msg):
 
 print("BOT FILE STARTED", flush=True)
 print("SERVICE READY", flush=True)
-send("✅ V31 STOCK EARLY ALERT BOT STARTED")
+send("✅ V32 MOMENTUM BEAST STOCK BOT STARTED")
 
 
 def market_open():
@@ -299,7 +301,6 @@ def analyze(stock):
 
         high_20 = float(high1.tail(20).max())
         near_breakout = price >= high_20 * 0.997
-
         breakout_level = high_20
 
         last_close = float(close1.iloc[-1])
@@ -321,11 +322,15 @@ def analyze(stock):
         )
 
         weak_breakout_volume = (
-            near_breakout and relative_volume < 1.15
+            near_breakout
+            and relative_volume < 0.85
+            and move_3m < 0.0015
         )
 
         fake_breakout_wick = (
-            near_breakout and wick_ratio > 0.45
+            near_breakout
+            and wick_ratio > 0.55
+            and move_3m < 0.0015
         )
 
         liquidity_grab_detected = (
@@ -384,7 +389,7 @@ def analyze(stock):
             score += 10
             reasons.append("الاختراق يبدو حقيقي وليس Liquidity Grab")
 
-        if 45 <= rsi1 <= 68:
+        if 45 <= rsi1 <= 72:
             score += 15
             reasons.append(f"RSI يجهز {rsi1:.1f}")
 
@@ -392,11 +397,11 @@ def analyze(stock):
             score += 15
             reasons.append("MACD بدأ يعطي إيجابية")
 
-        if price > vwap_value and -0.002 <= vwap_distance <= 0.006:
+        if price > vwap_value and -0.002 <= vwap_distance <= 0.0075:
             score += 15
             reasons.append("فوق VWAP وقريب منه")
 
-        if relative_volume >= 1.1:
+        if relative_volume >= 1.05:
             score += 15
             reasons.append(f"فوليوم بدأ يزيد {relative_volume:.2f}x")
 
@@ -424,11 +429,11 @@ def analyze(stock):
             score += 15
             reasons.append("أقوى من السوق SPY/QQQ")
 
-        if 0.0005 <= move_3m <= 0.006:
+        if 0.0005 <= move_3m <= 0.008:
             score += 15
             reasons.append("زخم مبكر آخر 3 دقائق")
 
-        if 0 <= move_5m <= 0.010:
+        if 0 <= move_5m <= 0.012:
             score += 10
             reasons.append("حركة صحية بدون مطاردة")
 
@@ -444,8 +449,35 @@ def analyze(stock):
             score += 10
             reasons.append("تذبذب مناسب للسكالب")
 
+        momentum_beast = (
+            aggressive_momentum
+            or real_score >= 7
+            or score >= 115
+            or (
+                relative_volume >= 1.7
+                and move_3m >= 0.0025
+                and relative_strength >= 0.0015
+            )
+            or (
+                near_breakout
+                and move_1m >= 0.001
+                and move_3m >= 0.002
+                and price > vwap_value
+            )
+        )
+
+        if momentum_beast:
+            score += 20
+            reasons.append("🔥 Momentum Beast: انفجار محتمل مبكر")
+
         alert_type = "EARLY" if score < STRONG_SCORE else "STRONG"
-        target_pct = TARGET_MAX if score >= STRONG_SCORE else TARGET_MIN
+
+        if momentum_beast or real_score >= 7 or score >= 115:
+            target_pct = TARGET_MAX
+        elif score >= STRONG_SCORE:
+            target_pct = TARGET_MID
+        else:
+            target_pct = TARGET_MIN
 
         return {
             "stock": stock,
@@ -472,6 +504,7 @@ def analyze(stock):
             "golden_setup": golden_setup,
             "good_setup": good_setup,
             "aggressive_momentum": aggressive_momentum,
+            "momentum_beast": momentum_beast,
             "quality_label": quality_label,
             "quality_warnings": quality_warnings
         }
@@ -485,8 +518,8 @@ def analyze(stock):
 
 
 send(
-    "🚀 V31 STOCK EARLY SCANNER ONLINE 🚀\n"
-    "👀 تنبيه مبكر قبل الانفجار + 🔥 تنبيه قوي + VWAP + Volume Spike + Relative Strength + Assistant Scalp View + Liquidity Grab Filter + Flexible Quality Filter"
+    "🚀 V32 MOMENTUM BEAST STOCK SCANNER ONLINE 🚀\n"
+    "👀 Early Alert + 🔥 Strong Alert + 🐺 Momentum Beast + 5 Min Cooldown + Strong Upgrade Bypass + Dynamic Target 0.6%-1%"
 )
 
 while True:
@@ -496,7 +529,7 @@ while True:
 
         if time.time() - last_heartbeat >= 3600:
             send(
-                f"👀 V31 STOCK BOT STILL RUNNING\n"
+                f"👀 V32 STOCK BOT STILL RUNNING\n"
                 f"⏰ KSA: {now_ksa}\n"
                 f"📡 البوت حي ويراقب الأسهم"
             )
@@ -526,12 +559,31 @@ while True:
             last_time = last_alert_time.get(stock, 0)
             av = result["assistant_view"]
 
-            if score >= EARLY_SCORE and now_time - last_time >= ALERT_COOLDOWN:
+            snapshot = last_alert_snapshot.get(stock, {})
+            last_score = snapshot.get("score", 0)
+            last_price = snapshot.get("price", 0)
+            last_beast = snapshot.get("beast", False)
+
+            beast_now = result["momentum_beast"]
+
+            normal_cooldown_ok = now_time - last_time >= ALERT_COOLDOWN
+
+            strong_upgrade = (
+                beast_now
+                and (
+                    not last_beast
+                    or score >= last_score + 15
+                    or result["price"] >= last_price * 1.003
+                    or result["relative_volume"] >= 2.0
+                )
+            )
+
+            if score >= EARLY_SCORE and (normal_cooldown_ok or strong_upgrade):
                 if result["alert_type"] == "STRONG":
-                    title = "🔥🚀 V31 STRONG STOCK ALERT 🚀🔥"
+                    title = "🔥🚀 V32 STRONG STOCK ALERT 🚀🔥"
                     note = "فرصة قوية الآن"
                 else:
-                    title = "👀⚡ V31 EARLY STOCK ALERT ⚡👀"
+                    title = "👀⚡ V32 EARLY STOCK ALERT ⚡👀"
                     note = "تنبيه مبكر قبل الانفجار المحتمل"
 
                 quality_warnings_text = (
@@ -562,6 +614,9 @@ while True:
 
 📌 النوع:
 {note}
+
+🐺 Momentum Beast:
+{'YES 🔥🔥' if result['momentum_beast'] else 'NO'}
 
 🏆 جودة الفرصة:
 {result['quality_label']}
@@ -607,7 +662,13 @@ while True:
 
                 send(msg)
                 print(msg, flush=True)
+
                 last_alert_time[stock] = now_time
+                last_alert_snapshot[stock] = {
+                    "score": score,
+                    "price": result["price"],
+                    "beast": beast_now
+                }
 
             del result
             gc.collect()
