@@ -20,8 +20,8 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTB
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1016589957")
 
 WATCHLIST = [
-    "TSLA", "NVDA", "AMD", "AVGO", "BE",
-    "META", "AMZN", "AAPL", "MSFT"
+    "TSLA", "NVDA", "AMD", "AVGO",
+    "AMZN", "AAPL", "MSFT"
 ]
 
 CHECK_SECONDS = 30
