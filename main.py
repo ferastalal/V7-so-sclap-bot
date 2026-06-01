@@ -16,7 +16,7 @@ import pytz
 # وإذا تبي تحطه داخل الكود، بدّل PUT_YOUR_TELEGRAM_TOKEN_HERE بتوكنك.
 # ==========================================================
 
-TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_YOUR_TELEGRAM_TOKEN_HERE")
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1016589957")
 
 WATCHLIST = [
