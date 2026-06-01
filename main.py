@@ -1,3 +1,4 @@
+print("🔥 THIS IS MY REAL FILE V32 🔥", flush=True)
 import yfinance as yf
 import ta
 import requests
