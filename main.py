@@ -1,4 +1,3 @@
-import os
 import yfinance as yf
 import ta
 import requests
@@ -7,45 +6,49 @@ import gc
 from datetime import datetime
 import pytz
 
-# =========================================================
-# V32.3 CLEAN MOMENTUM SCALP BOT
-# الهدف:
-# 1) يمنع رسائل WEAK / WATCH ONLY والفرص الزبالة
-# 2) لا يخنق الفرص القوية إذا كملت موجتها
-# 3) يصلح مشكلة Relative Volume = 0.00x بسبب شمعة ياهو غير المكتملة
-# 4) يقلل تكرار التنبيهات غير المفيد، ويسمح بتنبيه استمرار الموجة
-# =========================================================
+# =========================
+# TELEGRAM
+# =========================
+TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
+CHAT_ID = "1016589957"
 
-TOKEN = os.getenv("TELEGRAM_TOKEN", "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1016589957")
-
+# =========================
+# WATCHLIST
+# =========================
 WATCHLIST = [
     "TSLA", "NVDA", "AMD",
     "AMZN", "AAPL", "MSFT"
 ]
 
+# =========================
+# SETTINGS
+# =========================
 CHECK_SECONDS = 15
 
-# لا نبي سبام، لكن إذا السهم كمل موجته نبيه ينبه
-ALERT_COOLDOWN = 300              # التنبيه العادي كل 5 دقائق
-CONTINUATION_COOLDOWN = 90        # استمرار الموجة أسرع
-CONTINUATION_STEP = 0.006         # إذا تحرك من آخر تنبيه +0.60% وما زالت الجودة قوية
+# تنبيه لنفس السهم كل 5 دقائق طبيعي
+ALERT_COOLDOWN = 300
 
-# إرسال التنبيه
-MIN_SCORE_TO_SEND = 105
-MIN_REAL_SCORE_TO_SEND = 6        # يمنع Real Quality 1/9 و 3/9
-GOLDEN_REAL_SCORE = 6
+# استمرار الموجة: إذا السهم كمل +0.60% بعد آخر تنبيه نسمح بتنبيه متابعة
+CONTINUATION_MOVE = 0.006
+CONTINUATION_COOLDOWN = 120
 
-TARGET_GOOD = 0.006               # 0.60%
-TARGET_STRONG = 0.008             # 0.80%
-TARGET_GOLDEN = 0.010             # 1.00%
-STOP_LOSS = 0.003                 # 0.30%
+EARLY_SCORE = 75
+STRONG_SCORE = 95
 
-MAX_HISTORY_BARS = 260
-OPENING_HARD_BLOCK_MINUTES = 2    # أول دقيقتين فقط تجاهل كامل
-OPENING_CAUTION_MINUTES = 5       # من 2 إلى 5 دقائق لا يرسل إلا القوي جداً
+TARGET_MIN = 0.006
+TARGET_MID = 0.008
+TARGET_MAX = 0.010
+STOP_LOSS = 0.003
 
-MARKET_CACHE_SECONDS = 45
+MAX_HISTORY_BARS = 220
+OPENING_BLOCK_MINUTES = 5
+
+# فلتر الجودة الحقيقي
+MIN_REAL_SCORE_TO_SEND = 5
+MIN_GOLDEN_REAL_SCORE = 6
+
+# كاش السوق عشان ما نحمل SPY/QQQ مع كل سهم
+MARKET_CACHE_SECONDS = 60
 
 last_alert_time = {}
 last_alert_snapshot = {}
@@ -58,21 +61,26 @@ market_cache = {
 }
 
 
-# =========================================================
-# TELEGRAM
-# =========================================================
+# =========================
+# SEND TELEGRAM
+# =========================
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        r = requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        r = requests.get(url, params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
         print("TELEGRAM STATUS:", r.status_code, flush=True)
     except Exception as e:
         print("TELEGRAM ERROR:", e, flush=True)
 
 
-# =========================================================
-# TIME
-# =========================================================
+print("BOT FILE STARTED", flush=True)
+print("SERVICE READY", flush=True)
+send("✅ V32.4 CLEAN MOMENTUM BOT STARTED")
+
+
+# =========================
+# MARKET TIME
+# =========================
 def market_open():
     ny = pytz.timezone("America/New_York")
     now = datetime.now(ny)
@@ -84,21 +92,22 @@ def market_open():
     return "09:30" <= current <= "15:55"
 
 
-def minutes_after_open():
+def first_5_minutes_after_open():
     ny = pytz.timezone("America/New_York")
     now = datetime.now(ny)
 
     if now.weekday() >= 5:
-        return -1
+        return False
 
     open_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
-    diff = (now - open_time).total_seconds() / 60
-    return diff
+    block_end = now.replace(hour=9, minute=30 + OPENING_BLOCK_MINUTES, second=0, microsecond=0)
+
+    return open_time <= now < block_end
 
 
-# =========================================================
-# DATA HELPERS
-# =========================================================
+# =========================
+# DATA
+# =========================
 def download(stock, period, interval):
     df = yf.download(
         stock,
@@ -115,27 +124,146 @@ def download(stock, period, interval):
     return df
 
 
-def safe_series(df, name):
-    return df[name].squeeze()
-
-
 def vwap(df):
-    high = safe_series(df, "High")
-    low = safe_series(df, "Low")
-    close = safe_series(df, "Close")
-    volume = safe_series(df, "Volume")
+    high = df["High"].squeeze()
+    low = df["Low"].squeeze()
+    close = df["Close"].squeeze()
+    volume = df["Volume"].squeeze()
 
-    if float(volume.sum()) <= 0:
+    if volume.sum() <= 0:
         return float(close.iloc[-1])
 
     typical = (high + low + close) / 3
     return float((typical * volume).sum() / volume.sum())
 
 
-def get_market_move():
-    # كاش عشان ما يحمل SPY/QQQ لكل سهم ويبطئ البوت
+# =========================
+# REAL QUALITY FILTER
+# =========================
+def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_volume, adx, atr_pct, vwap_distance, rsi1, rsi5):
+    real_score = 0
+    warnings = []
+
+    if move_1m > 0.0006:
+        real_score += 1
+    else:
+        warnings.append("Move 1m ضعيف")
+
+    if move_3m > 0.0016:
+        real_score += 1
+    else:
+        warnings.append("Move 3m ضعيف")
+
+    if move_5m > 0.0025:
+        real_score += 1
+    else:
+        warnings.append("Move 5m ضعيف")
+
+    if relative_strength > 0.0012:
+        real_score += 1
+    else:
+        warnings.append("القوة النسبية ضعيفة")
+
+    if relative_volume >= 1.00:
+        real_score += 1
+    else:
+        warnings.append("الفوليوم أقل من المطلوب")
+
+    if adx >= 20:
+        real_score += 1
+    else:
+        warnings.append("ADX ضعيف")
+
+    if 0.0010 <= atr_pct <= 0.010:
+        real_score += 1
+    else:
+        warnings.append("ATR غير مناسب")
+
+    if -0.001 <= vwap_distance <= 0.012:
+        real_score += 1
+    else:
+        warnings.append("البعد عن VWAP غير مناسب")
+
+    if 50 <= rsi5 <= 74:
+        real_score += 1
+    else:
+        warnings.append("RSI 5m غير داعم")
+
+    aggressive_momentum = (
+        real_score >= 5
+        and adx >= 28
+        and move_3m >= 0.002
+        and move_5m >= 0.003
+        and relative_strength >= 0.0015
+        and relative_volume >= 1.10
+        and price_safe_rsi(rsi1, rsi5)
+    )
+
+    golden_setup = real_score >= MIN_GOLDEN_REAL_SCORE or aggressive_momentum
+    good_setup = real_score >= MIN_REAL_SCORE_TO_SEND or aggressive_momentum
+
+    if golden_setup:
+        quality_label = "🔥 GOLDEN SETUP"
+    elif good_setup:
+        quality_label = "✅ GOOD SETUP"
+    else:
+        quality_label = "⚠️ WEAK / FILTERED"
+
+    return real_score, golden_setup, good_setup, aggressive_momentum, quality_label, warnings
+
+
+def price_safe_rsi(rsi1, rsi5):
+    return rsi1 <= 80 and rsi5 <= 76
+
+
+# =========================
+# ASSISTANT VIEW
+# =========================
+def assistant_scalp_view(price, high1, low1, close1, vwap_value, vwap_distance, move_1m, move_3m, move_5m, rsi1):
+    resistance = float(high1.tail(12).max())
+    support = float(low1.tail(12).min())
+    recent_low = float(low1.tail(8).min())
+
+    entry = resistance * 1.0005
+
+    # وقف عملي قريب: لا نخلي الوقف بعيد تحت الدعم بشكل مبالغ
+    stop = max(entry * (1 - STOP_LOSS), recent_low * 0.999)
+
+    target1 = entry * 1.006
+    target2 = entry * 1.010
+
+    if move_5m > 0.018 or vwap_distance > 0.016 or rsi1 > 80:
+        status = "قوي لكن لا تطارد"
+        advice = "انتظر اختراق جديد أو تهدئة بسيطة."
+    elif price >= entry:
+        status = "اختراق فعلي"
+        advice = "دخول محتمل بشرط شمعة 1m تغلق فوق الدخول."
+    elif price > vwap_value and price >= support:
+        status = "راقب الاختراق"
+        advice = f"الدخول الأفضل فوق {entry:.2f}."
+    else:
+        status = "انتظار"
+        advice = "لا تدخل قبل تأكيد الاختراق."
+
+    return {
+        "status": status,
+        "entry": entry,
+        "target1": target1,
+        "target2": target2,
+        "stop": stop,
+        "support": support,
+        "resistance": resistance,
+        "advice": advice
+    }
+
+
+# =========================
+# MARKET MOVE WITH CACHE
+# =========================
+def market_move():
     now = time.time()
-    if now - market_cache["time"] < MARKET_CACHE_SECONDS:
+
+    if now - market_cache["time"] <= MARKET_CACHE_SECONDS:
         return market_cache["move"], market_cache["reason"]
 
     try:
@@ -145,18 +273,17 @@ def get_market_move():
         if spy.empty or qqq.empty or len(spy) < 30 or len(qqq) < 30:
             return 0, "السوق غير واضح"
 
-        # نستخدم آخر شمعة مكتملة -2 لتقليل مشاكل ياهو
-        spy_close = safe_series(spy, "Close")
-        qqq_close = safe_series(qqq, "Close")
+        spy_close = spy["Close"].squeeze()
+        qqq_close = qqq["Close"].squeeze()
 
-        spy_move = (float(spy_close.iloc[-2]) - float(spy_close.iloc[-7])) / float(spy_close.iloc[-7])
-        qqq_move = (float(qqq_close.iloc[-2]) - float(qqq_close.iloc[-7])) / float(qqq_close.iloc[-7])
+        spy_move = (float(spy_close.iloc[-1]) - float(spy_close.iloc[-6])) / float(spy_close.iloc[-6])
+        qqq_move = (float(qqq_close.iloc[-1]) - float(qqq_close.iloc[-6])) / float(qqq_close.iloc[-6])
 
         avg_move = (spy_move + qqq_move) / 2
 
-        if avg_move >= 0.001:
+        if avg_move > 0.0002:
             reason = "السوق داعم"
-        elif avg_move <= -0.0015:
+        elif avg_move < -0.0015:
             reason = "السوق ضعيف"
         else:
             reason = "السوق محايد"
@@ -175,272 +302,159 @@ def get_market_move():
         return 0, "تعذر فحص السوق"
 
 
-# =========================================================
-# QUALITY FILTER
-# =========================================================
-def real_quality_filter(
-    move_1m, move_3m, move_5m, relative_strength,
-    relative_volume, adx, atr_pct, vwap_distance, rsi1, rsi5,
-    price, ema9_1, ema21_1, near_breakout
-):
-    real_score = 0
-    warnings = []
-
-    if move_1m >= 0.0005:
-        real_score += 1
-    else:
-        warnings.append("زخم الدقيقة ضعيف")
-
-    if move_3m >= 0.0015:
-        real_score += 1
-    else:
-        warnings.append("زخم 3 دقائق غير كافي")
-
-    if move_5m >= 0.0025:
-        real_score += 1
-    else:
-        warnings.append("زخم 5 دقائق ضعيف")
-
-    if relative_strength >= 0.0012:
-        real_score += 1
-    else:
-        warnings.append("السهم مو أقوى من السوق كفاية")
-
-    # إصلاح مهم: لا نقبل RVOL صفر أو ضعيف حتى لو السكور عالي
-    if relative_volume >= 1.05:
-        real_score += 1
-    else:
-        warnings.append("الفوليوم أقل من المطلوب")
-
-    if adx >= 22:
-        real_score += 1
-    else:
-        warnings.append("ADX ضعيف")
-
-    if 0.0012 <= atr_pct <= 0.010:
-        real_score += 1
-    else:
-        warnings.append("ATR غير مناسب للسكالب")
-
-    # لا نخنق الفرص القريبة من VWAP، لكن نمنع المطاردة البعيدة
-    if -0.0015 <= vwap_distance <= 0.010:
-        real_score += 1
-    else:
-        warnings.append("السعر بعيد/سيء عن VWAP")
-
-    if 50 <= rsi5 <= 74 and rsi1 <= 82:
-        real_score += 1
-    else:
-        warnings.append("RSI غير مثالي")
-
-    trend_ok = price > ema9_1 > ema21_1
-
-    aggressive_momentum = (
-        relative_volume >= 1.35
-        and adx >= 26
-        and move_3m >= 0.0022
-        and move_5m >= 0.0030
-        and relative_strength >= 0.0015
-        and vwap_distance <= 0.012
-        and rsi1 <= 82
-        and (trend_ok or near_breakout)
-    )
-
-    golden_setup = (
-        real_score >= GOLDEN_REAL_SCORE
-        and relative_volume >= 1.10
-        and vwap_distance <= 0.010
-        and rsi1 <= 80
-    ) or aggressive_momentum
-
-    good_setup = (
-        real_score >= MIN_REAL_SCORE_TO_SEND
-        and relative_volume >= 1.05
-        and -0.0015 <= vwap_distance <= 0.012
-        and rsi1 <= 82
-    ) or aggressive_momentum
-
-    if golden_setup:
-        quality_label = "🔥 GOLDEN SETUP"
-    elif good_setup:
-        quality_label = "✅ GOOD SETUP"
-    else:
-        quality_label = "🚫 FILTERED - NO ALERT"
-
-    return real_score, golden_setup, good_setup, aggressive_momentum, quality_label, warnings
-
-
-def detect_liquidity_grab(
-    near_breakout, breakout_level,
-    last_close, prev_close, last_high, last_low,
-    move_1m, move_3m, relative_volume
-):
-    candle_range = max(last_high - last_low, 0.0001)
-    upper_wick = last_high - max(last_close, prev_close)
-    wick_ratio = upper_wick / candle_range
-
-    breakout_failed = last_high > breakout_level * 1.001 and last_close < breakout_level
-    fast_rejection = move_1m < -0.002
-    weak_breakout_volume = near_breakout and relative_volume < 0.90 and move_3m < 0.0015
-    fake_breakout_wick = near_breakout and wick_ratio > 0.60 and move_3m < 0.0015
-
-    return breakout_failed or fast_rejection or weak_breakout_volume or fake_breakout_wick
-
-
-def assistant_scalp_view(price, high1, low1, vwap_value, vwap_distance, move_5m, rsi1):
-    resistance = float(high1.tail(12).max())
-    support = float(low1.tail(12).min())
-    recent_low = float(low1.tail(8).min())
-
-    entry = resistance * 1.0003
-    stop = max(entry * (1 - STOP_LOSS), recent_low * 0.999)
-
-    target1 = entry * 1.006
-    target2 = entry * 1.010
-
-    if move_5m > 0.018 or vwap_distance > 0.014 or rsi1 > 82:
-        status = "قوي لكن لا تطارد"
-        advice = "انتظر تهدئة أو كسر جديد واضح، لا تدخل بعد تمدد قوي."
-    elif price >= entry:
-        status = "اختراق فعلي"
-        advice = "دخول سكالب محتمل بعد إغلاق شمعة 1m فوق الكسر."
-    elif price > vwap_value and price >= support:
-        status = "راقب الاختراق"
-        advice = f"الدخول الأفضل فوق {entry:.2f} بعد إغلاق 1m."
-    else:
-        status = "انتظار"
-        advice = "لا تدخل قبل رجوع السعر فوق VWAP أو كسر مقاومة واضح."
-
-    return {
-        "status": status,
-        "entry": entry,
-        "target1": target1,
-        "target2": target2,
-        "stop": stop,
-        "support": support,
-        "resistance": resistance,
-        "advice": advice
-    }
-
-
-# =========================================================
-# ANALYZE
-# =========================================================
+# =========================
+# ANALYZE STOCK
+# =========================
 def analyze(stock):
     try:
         df1 = download(stock, "2d", "1m")
         df5 = download(stock, "5d", "5m")
         df15 = download(stock, "10d", "15m")
 
-        if df1.empty or df5.empty or df15.empty or len(df1) < 90 or len(df5) < 40 or len(df15) < 30:
+        if df1.empty or df5.empty or df15.empty or len(df1) < 80 or len(df5) < 30 or len(df15) < 30:
             return None
 
-        close1 = safe_series(df1, "Close")
-        high1 = safe_series(df1, "High")
-        low1 = safe_series(df1, "Low")
-        volume1 = safe_series(df1, "Volume")
+        close1 = df1["Close"].squeeze()
+        high1 = df1["High"].squeeze()
+        low1 = df1["Low"].squeeze()
+        volume1 = df1["Volume"].squeeze()
 
-        close5 = safe_series(df5, "Close")
-        close15 = safe_series(df15, "Close")
+        close5 = df5["Close"].squeeze()
+        close15 = df15["Close"].squeeze()
 
-        # live price للعرض، signal bar للمؤشرات والفوليوم
-        live_price = float(close1.iloc[-1])
-        signal_price = float(close1.iloc[-2])
+        price = float(close1.iloc[-1])
 
-        ema9_1_series = ta.trend.EMAIndicator(close1, window=9).ema_indicator()
-        ema21_1_series = ta.trend.EMAIndicator(close1, window=21).ema_indicator()
-        ema50_1_series = ta.trend.EMAIndicator(close1, window=50).ema_indicator()
+        ema9_1 = ta.trend.EMAIndicator(close1, window=9).ema_indicator().iloc[-1]
+        ema21_1 = ta.trend.EMAIndicator(close1, window=21).ema_indicator().iloc[-1]
+        ema50_1 = ta.trend.EMAIndicator(close1, window=50).ema_indicator().iloc[-1]
 
-        ema9_1 = float(ema9_1_series.iloc[-2])
-        ema21_1 = float(ema21_1_series.iloc[-2])
-        ema50_1 = float(ema50_1_series.iloc[-2])
+        ema9_5 = ta.trend.EMAIndicator(close5, window=9).ema_indicator().iloc[-1]
+        ema21_5 = ta.trend.EMAIndicator(close5, window=21).ema_indicator().iloc[-1]
 
-        ema9_5 = float(ta.trend.EMAIndicator(close5, window=9).ema_indicator().iloc[-2])
-        ema21_5 = float(ta.trend.EMAIndicator(close5, window=21).ema_indicator().iloc[-2])
+        ema9_15 = ta.trend.EMAIndicator(close15, window=9).ema_indicator().iloc[-1]
+        ema21_15 = ta.trend.EMAIndicator(close15, window=21).ema_indicator().iloc[-1]
 
-        ema9_15 = float(ta.trend.EMAIndicator(close15, window=9).ema_indicator().iloc[-2])
-        ema21_15 = float(ta.trend.EMAIndicator(close15, window=21).ema_indicator().iloc[-2])
-
-        rsi1 = float(ta.momentum.RSIIndicator(close1, window=14).rsi().iloc[-2])
-        rsi5 = float(ta.momentum.RSIIndicator(close5, window=14).rsi().iloc[-2])
+        rsi1 = ta.momentum.RSIIndicator(close1, window=14).rsi().iloc[-1]
+        rsi5 = ta.momentum.RSIIndicator(close5, window=14).rsi().iloc[-1]
 
         macd1 = ta.trend.MACD(close1)
-        macd1_now = float(macd1.macd().iloc[-2])
-        macd1_signal = float(macd1.macd_signal().iloc[-2])
+        macd1_now = macd1.macd().iloc[-1]
+        macd1_signal = macd1.macd_signal().iloc[-1]
 
-        adx = float(ta.trend.ADXIndicator(high=high1, low=low1, close=close1, window=14).adx().iloc[-2])
+        adx = ta.trend.ADXIndicator(
+            high=high1,
+            low=low1,
+            close=close1,
+            window=14
+        ).adx().iloc[-1]
 
-        atr = float(ta.volatility.AverageTrueRange(
-            high=high1, low=low1, close=close1, window=14
-        ).average_true_range().iloc[-2])
+        atr = ta.volatility.AverageTrueRange(
+            high=high1,
+            low=low1,
+            close=close1,
+            window=14
+        ).average_true_range().iloc[-1]
 
-        atr_pct = atr / signal_price
+        atr_pct = float(atr) / price
 
-        # إصلاح RVOL: آخر شمعة مكتملة / متوسط 30 شمعة قبلها، وليس الشمعة الحالية الناقصة
-        vol_signal = float(volume1.iloc[-2])
+        # الفوليوم: نستخدم آخر شمعة مكتملة غالباً عشان ما يطلع 0.00x أو يخرب القرار
+        vol_now = float(volume1.iloc[-2])
         vol_avg = float(volume1.iloc[-32:-2].mean())
 
-        if vol_avg <= 0 or vol_signal <= 0:
+        if vol_avg <= 0:
             return None
 
-        relative_volume = vol_signal / vol_avg
-        dollar_volume = signal_price * vol_signal
+        relative_volume = vol_now / vol_avg
+        dollar_volume = price * vol_now
 
-        move_1m = (signal_price - float(close1.iloc[-3])) / float(close1.iloc[-3])
-        move_3m = (signal_price - float(close1.iloc[-5])) / float(close1.iloc[-5])
-        move_5m = (signal_price - float(close1.iloc[-7])) / float(close1.iloc[-7])
-        move_15m = (signal_price - float(close1.iloc[-17])) / float(close1.iloc[-17])
+        move_1m = (price - float(close1.iloc[-2])) / float(close1.iloc[-2])
+        move_3m = (price - float(close1.iloc[-4])) / float(close1.iloc[-4])
+        move_5m = (price - float(close1.iloc[-6])) / float(close1.iloc[-6])
+        move_15m = (price - float(close1.iloc[-16])) / float(close1.iloc[-16])
 
-        # قمة آخر 20 شمعة قبل شمعة الإشارة حتى لا نقارن السعر بنفسه
-        high_20 = float(high1.iloc[-22:-2].max())
-        near_breakout = signal_price >= high_20 * 0.997
+        high_20 = float(high1.tail(20).max())
+        near_breakout = price >= high_20 * 0.997
         breakout_level = high_20
 
-        last_close = float(close1.iloc[-2])
-        prev_close = float(close1.iloc[-3])
-        last_high = float(high1.iloc[-2])
-        last_low = float(low1.iloc[-2])
+        last_close = float(close1.iloc[-1])
+        prev_close = float(close1.iloc[-2])
+        last_high = float(high1.iloc[-1])
+        last_low = float(low1.iloc[-1])
 
-        if detect_liquidity_grab(
-            near_breakout, breakout_level,
-            last_close, prev_close, last_high, last_low,
-            move_1m, move_3m, relative_volume
-        ):
-            print(f"{stock}: FILTERED LIQUIDITY GRAB", flush=True)
+        candle_range = max(last_high - last_low, 0.0001)
+        upper_wick = last_high - max(last_close, prev_close)
+        wick_ratio = upper_wick / candle_range
+
+        breakout_failed = (
+            last_high > breakout_level * 1.001
+            and last_close < breakout_level
+        )
+
+        fast_rejection = move_1m < -0.002
+
+        weak_breakout_volume = (
+            near_breakout
+            and relative_volume < 0.75
+            and move_3m < 0.0012
+        )
+
+        fake_breakout_wick = (
+            near_breakout
+            and wick_ratio > 0.60
+            and move_3m < 0.0015
+        )
+
+        liquidity_grab_detected = (
+            breakout_failed
+            or fast_rejection
+            or weak_breakout_volume
+            or fake_breakout_wick
+        )
+
+        if liquidity_grab_detected:
+            print(f"{stock}: LIQUIDITY GRAB FILTERED", flush=True)
             return None
 
-        vwap_value = vwap(df1.tail(90).iloc[:-1])
-        vwap_distance = (signal_price - vwap_value) / vwap_value
+        vwap_value = vwap(df1.tail(60))
+        vwap_distance = (price - vwap_value) / vwap_value
 
-        spy_move, market_reason = get_market_move()
+        spy_move, market_reason = market_move()
         relative_strength = move_5m - spy_move
 
-        # فلاتر مطاردة: تخفف الرسائل الزبالة بدون خنق الفرص الطبيعية
-        if move_1m > 0.010:
+        # لا نطارد الممتد جداً
+        if move_1m > 0.012:
             return None
-        if move_5m > 0.022:
+
+        if move_5m > 0.020:
             return None
-        if move_15m > 0.045:
+
+        if move_15m > 0.040:
             return None
-        if vwap_distance > 0.015:
+
+        if vwap_distance > 0.018:
             return None
-        if rsi1 > 84:
+
+        if rsi1 > 82:
             return None
-        if relative_volume < 1.00:
+
+        if price < vwap_value * 0.998:
             return None
 
         assistant_view = assistant_scalp_view(
-            signal_price, high1, low1, vwap_value, vwap_distance, move_5m, rsi1
+            price, high1, low1, close1,
+            vwap_value, vwap_distance,
+            move_1m, move_3m, move_5m, rsi1
         )
 
         real_score, golden_setup, good_setup, aggressive_momentum, quality_label, quality_warnings = real_quality_filter(
-            move_1m, move_3m, move_5m, relative_strength,
-            relative_volume, adx, atr_pct, vwap_distance,
-            rsi1, rsi5, signal_price, ema9_1, ema21_1, near_breakout
+            move_1m, move_3m, move_5m,
+            relative_strength, relative_volume,
+            adx, atr_pct, vwap_distance,
+            rsi1, rsi5
         )
 
-        # أهم تعديل: ممنوع ترسل WATCH ONLY
-        if not good_setup or real_score < MIN_REAL_SCORE_TO_SEND:
+        # أهم تعديل: ممنوع إرسال فرص WEAK حتى لو السكور الحسابي عالي
+        if not good_setup:
             return None
 
         score = 0
@@ -450,123 +464,119 @@ def analyze(stock):
             score += 20
             reasons.append("قريب من كسر قمة آخر 20 شمعة")
 
-        if 48 <= rsi1 <= 78:
-            score += 12
+        score += 10
+        reasons.append("لا يوجد Liquidity Grab واضح")
+
+        if 45 <= rsi1 <= 76:
+            score += 15
             reasons.append(f"RSI 1m مناسب {rsi1:.1f}")
 
         if 50 <= rsi5 <= 74:
-            score += 12
+            score += 10
             reasons.append(f"RSI 5m داعم {rsi5:.1f}")
 
         if macd1_now > macd1_signal:
-            score += 12
+            score += 15
             reasons.append("MACD إيجابي")
 
-        if signal_price > vwap_value and -0.001 <= vwap_distance <= 0.010:
-            score += 14
+        if price > vwap_value and -0.001 <= vwap_distance <= 0.012:
+            score += 15
             reasons.append("فوق VWAP وبمسافة مقبولة")
 
-        if relative_volume >= 1.05:
-            score += 14
-            reasons.append(f"فوليوم مقبول {relative_volume:.2f}x")
+        if relative_volume >= 1.00:
+            score += 15
+            reasons.append(f"الفوليوم مقبول {relative_volume:.2f}x")
 
         if relative_volume >= 1.50:
-            score += 10
+            score += 15
             reasons.append("فوليوم قوي")
 
-        if signal_price > ema9_1 > ema21_1:
-            score += 14
+        if price > ema9_1 > ema21_1:
+            score += 15
             reasons.append("ترند 1m صاعد")
 
         if ema9_5 > ema21_5:
-            score += 8
+            score += 10
             reasons.append("ترند 5m داعم")
 
         if ema9_15 > ema21_15:
-            score += 6
+            score += 10
             reasons.append("ترند 15m داعم")
 
-        if signal_price > ema50_1:
-            score += 8
+        if price > ema50_1:
+            score += 10
             reasons.append("فوق EMA50")
 
-        if relative_strength >= 0.0012:
-            score += 14
-            reasons.append("أقوى من السوق SPY/QQQ")
+        if relative_strength > 0.001:
+            score += 15
+            reasons.append("أقوى من السوق")
 
-        if 0.0015 <= move_3m <= 0.010:
-            score += 12
+        if 0.0005 <= move_3m <= 0.008:
+            score += 15
             reasons.append("زخم 3 دقائق صحي")
 
-        if 0.0025 <= move_5m <= 0.015:
+        if 0 <= move_5m <= 0.012:
             score += 10
-            reasons.append("زخم 5 دقائق صحي")
+            reasons.append("حركة 5 دقائق بدون مطاردة")
 
-        if adx >= 22:
+        if adx >= 20:
             score += 10
-            reasons.append(f"ADX داعم {adx:.1f}")
+            reasons.append(f"ADX مقبول {adx:.1f}")
 
         if dollar_volume > 500000:
-            score += 8
-            reasons.append("Dollar Volume جيد")
+            score += 10
+            reasons.append("Dollar Volume مقبول")
 
-        if 0.0012 <= atr_pct <= 0.010:
-            score += 8
+        if 0.0010 <= atr_pct <= 0.010:
+            score += 10
             reasons.append("ATR مناسب للسكالب")
 
         momentum_beast = (
             aggressive_momentum
+            or real_score >= 7
             or (
-                real_score >= 7
-                and relative_volume >= 1.25
-                and move_3m >= 0.002
-                and relative_strength >= 0.0012
+                relative_volume >= 1.50
+                and move_3m >= 0.0022
+                and relative_strength >= 0.0015
+                and adx >= 22
             )
             or (
                 near_breakout
-                and relative_volume >= 1.35
                 and move_1m >= 0.0008
-                and move_3m >= 0.002
-                and signal_price > vwap_value
-                and relative_strength >= 0.0012
+                and move_3m >= 0.0018
+                and price > vwap_value
+                and real_score >= 5
             )
         )
 
         if momentum_beast:
-            score += 18
-            reasons.append("🐺 Momentum Beast حقيقي: زخم + فوليوم + قوة نسبية")
+            score += 20
+            reasons.append("🐺 Momentum Beast فعلي")
 
-        if score < MIN_SCORE_TO_SEND and not momentum_beast and not golden_setup:
+        if score < EARLY_SCORE:
             return None
 
-        # أول 5 دقائق: لا نخنقها بالكامل، لكن نسمح فقط بالقوي جداً بعد أول دقيقتين
-        mins = minutes_after_open()
-        if 0 <= mins < OPENING_HARD_BLOCK_MINUTES:
-            return None
-        if OPENING_HARD_BLOCK_MINUTES <= mins < OPENING_CAUTION_MINUTES:
-            if not (golden_setup and momentum_beast and relative_volume >= 1.5):
-                return None
-
-        if golden_setup or momentum_beast or score >= 135:
-            target_pct = TARGET_GOLDEN
-            alert_rank = "GOLDEN"
-        elif score >= 120:
-            target_pct = TARGET_STRONG
-            alert_rank = "STRONG"
+        if golden_setup or score >= STRONG_SCORE:
+            alert_type = "STRONG"
         else:
-            target_pct = TARGET_GOOD
-            alert_rank = "GOOD"
+            alert_type = "EARLY"
+
+        if golden_setup or momentum_beast:
+            target_pct = TARGET_MAX
+        elif score >= STRONG_SCORE:
+            target_pct = TARGET_MID
+        else:
+            target_pct = TARGET_MIN
 
         return {
             "stock": stock,
-            "price": live_price,
-            "signal_price": signal_price,
+            "price": price,
             "score": score,
-            "alert_rank": alert_rank,
-            "target": live_price * (1 + target_pct),
-            "stop": live_price * (1 - STOP_LOSS),
+            "alert_type": alert_type,
+            "target": price * (1 + target_pct),
+            "stop": price * (1 - STOP_LOSS),
             "target_pct": target_pct,
-            "reasons": reasons[:8],
+            "reasons": reasons,
             "market_reason": market_reason,
             "rsi1": rsi1,
             "rsi5": rsi5,
@@ -585,7 +595,7 @@ def analyze(stock):
             "aggressive_momentum": aggressive_momentum,
             "momentum_beast": momentum_beast,
             "quality_label": quality_label,
-            "quality_warnings": quality_warnings[:3]
+            "quality_warnings": quality_warnings
         }
 
     except Exception as e:
@@ -596,167 +606,15 @@ def analyze(stock):
         gc.collect()
 
 
-# =========================================================
-# ALERT CONTROL
-# =========================================================
-def should_send_alert(stock, result, now_time):
-    last_time = last_alert_time.get(stock, 0)
-    snapshot = last_alert_snapshot.get(stock, {})
-
-    last_score = snapshot.get("score", 0)
-    last_price = snapshot.get("price", 0)
-    last_rank = snapshot.get("rank", "")
-    last_beast = snapshot.get("beast", False)
-
-    normal_ok = now_time - last_time >= ALERT_COOLDOWN
-
-    quality_upgrade = (
-        result["momentum_beast"]
-        and (
-            not last_beast
-            or result["score"] >= last_score + 15
-            or (last_rank != "GOLDEN" and result["alert_rank"] == "GOLDEN")
-            or result["relative_volume"] >= 2.0
-        )
-    )
-
-    continuation_base = (
-        last_price > 0
-        and now_time - last_time >= CONTINUATION_COOLDOWN
-        and result["price"] >= last_price * (1 + CONTINUATION_STEP)
-        and result["relative_volume"] >= 1.05
-    )
-
-    continuation = continuation_base and (
-        result["momentum_beast"]
-        or (
-            result["alert_rank"] == "GOLDEN"
-            and result["real_score"] >= GOLDEN_REAL_SCORE
-        )
-    )
-
-    if not snapshot:
-        return True, "FIRST_ALERT"
-
-    if normal_ok:
-        return True, "COOLDOWN_OK"
-
-    if quality_upgrade:
-        return True, "QUALITY_UPGRADE"
-
-    if continuation:
-        return True, "CONTINUATION"
-
-    return False, "SKIP"
-
-
-def build_message(stock, result, now_ksa, send_reason):
-    av = result["assistant_view"]
-
-    if result["alert_rank"] == "GOLDEN":
-        title = "🔥🚀 V32.3 GOLDEN STOCK ALERT 🚀🔥"
-        note = "فرصة ذهبية عالية الجودة"
-    elif result["alert_rank"] == "STRONG":
-        title = "✅🚀 V32.3 STRONG STOCK ALERT 🚀✅"
-        note = "فرصة قوية بجودة مقبولة"
-    else:
-        title = "👀⚡ V32.3 GOOD STOCK ALERT ⚡👀"
-        note = "فرصة جيدة وليست دخول أعمى"
-
-    if send_reason == "CONTINUATION":
-        reason_text = "استمرار الموجة بعد آخر تنبيه"
-    elif send_reason == "QUALITY_UPGRADE":
-        reason_text = "ترقية جودة/زخم"
-    elif send_reason == "COOLDOWN_OK":
-        reason_text = "انتهى الكولداون وما زالت الفرصة صالحة"
-    else:
-        reason_text = "أول تنبيه للفرصة"
-
-    warnings_text = (
-        "\n".join(["- " + w for w in result["quality_warnings"]])
-        if result["quality_warnings"]
-        else "- لا توجد ملاحظات خطيرة"
-    )
-
-    reasons_text = "\n".join(["- " + r for r in result["reasons"]])
-
-    msg = f"""
-{title}
-
-📈 السهم: {stock}
-⏰ الوقت KSA: {now_ksa}
-🔁 سبب الإرسال: {reason_text}
-
-💰 السعر الحالي:
-{result['price']:.2f}
-
-🎯 الهدف المتوقع:
-{result['target']:.2f}
-({result['target_pct']*100:.2f}%)
-
-🛑 وقف المتابعة:
-{result['stop']:.2f}
-({STOP_LOSS*100:.2f}%)
-
-🔥 السكور:
-{result['score']}/100
-
-📌 النوع:
-{note}
-
-🐺 Momentum Beast:
-{'YES 🔥🔥' if result['momentum_beast'] else 'NO'}
-
-🏆 جودة الفرصة:
-{result['quality_label']}
-
-📊 Real Quality Score:
-{result['real_score']}/9
-
-📊 التحليل المختصر:
-- {result['market_reason']}
-- RSI 1m: {result['rsi1']:.1f}
-- RSI 5m: {result['rsi5']:.1f}
-- ADX: {result['adx']:.1f}
-- Relative Volume: {result['relative_volume']:.2f}x
-- ATR: {result['atr_pct']*100:.2f}%
-- VWAP Distance: {result['vwap_distance']*100:.2f}%
-- Move 1m: {result['move_1m']*100:.2f}%
-- Move 3m: {result['move_3m']*100:.2f}%
-- Move 5m: {result['move_5m']*100:.2f}%
-- Relative Strength: {result['relative_strength']*100:.2f}%
-
-⚠️ ملاحظات الجودة:
-{warnings_text}
-
-✅ أهم أسباب التنبيه:
-{reasons_text}
-
-🧠 رأي السكالب:
-- الحالة: {av['status']}
-- الدعم القريب: {av['support']:.2f}
-- المقاومة القريبة: {av['resistance']:.2f}
-- الدخول الأفضل: فوق {av['entry']:.2f}
-- الهدف الأول: {av['target1']:.2f}
-- الهدف الثاني: {av['target2']:.2f}
-- وقف السكالب: {av['stop']:.2f}
-- الخطة: إذا وصل الهدف الأول بيع نصف الكمية وارفع الوقف لسعر الدخول.
-- ملاحظة: {av['advice']}
-
-⚠️ تنبيه فقط، القرار النهائي عليك.
-"""
-    return msg
-
-
-# =========================================================
-# START
-# =========================================================
-print("BOT FILE STARTED", flush=True)
-print("SERVICE READY", flush=True)
-
+# =========================
+# MAIN LOOP
+# =========================
 send(
-    "✅ V32.3 CLEAN MOMENTUM BOT STARTED\n"
-    "فلترة الرسائل الضعيفة مفعلة + استمرار الموجة مفعّل + RVOL محسوب من شمعة مكتملة"
+    "🚀 V32.4 ONLINE\n"
+    "✅ يرسل فقط GOOD / GOLDEN\n"
+    "🚫 يمنع WEAK حتى لو السكور عالي\n"
+    "🐺 Momentum Beast مضبوط\n"
+    "🔁 يتابع السهم إذا كمل موجة جديدة"
 )
 
 while True:
@@ -765,15 +623,17 @@ while True:
         now_ksa = datetime.now(saudi).strftime("%H:%M:%S")
 
         if time.time() - last_heartbeat >= 3600:
-            send(
-                f"👀 V32.3 STOCK BOT STILL RUNNING\n"
-                f"⏰ KSA: {now_ksa}\n"
-                f"📡 البوت حي ويراقب الأسهم"
-            )
+            send(f"👀 V32.4 STILL RUNNING | KSA {now_ksa}")
             last_heartbeat = time.time()
 
         if not market_open():
             print("MARKET CLOSED - BOT ALIVE", now_ksa, flush=True)
+            time.sleep(15)
+            gc.collect()
+            continue
+
+        if first_5_minutes_after_open():
+            print("⏳ أول 5 دقائق من الافتتاح - تجاهل التنبيهات", now_ksa, flush=True)
             time.sleep(15)
             gc.collect()
             continue
@@ -785,21 +645,124 @@ while True:
                 gc.collect()
                 continue
 
+            score = result["score"]
             now_time = time.time()
-            send_ok, send_reason = should_send_alert(stock, result, now_time)
+            last_time = last_alert_time.get(stock, 0)
+            av = result["assistant_view"]
 
-            if send_ok:
-                msg = build_message(stock, result, now_ksa, send_reason)
+            snapshot = last_alert_snapshot.get(stock, {})
+            last_score = snapshot.get("score", 0)
+            last_price = snapshot.get("price", 0)
+            last_beast = snapshot.get("beast", False)
+            last_real_score = snapshot.get("real_score", 0)
+
+            beast_now = result["momentum_beast"]
+
+            normal_cooldown_ok = now_time - last_time >= ALERT_COOLDOWN
+
+            # ترقية جودة: من عادي إلى Beast أو تحسن واضح في الجودة
+            quality_upgrade = (
+                beast_now
+                and (
+                    not last_beast
+                    or score >= last_score + 15
+                    or result["real_score"] > last_real_score
+                    or result["relative_volume"] >= 2.0
+                )
+            )
+
+            # استمرار الموجة: مثل 500 -> 505 ثم 505 -> 510
+            continuation_alert = (
+                last_price > 0
+                and result["price"] >= last_price * (1 + CONTINUATION_MOVE)
+                and now_time - last_time >= CONTINUATION_COOLDOWN
+                and result["good_setup"]
+                and result["move_3m"] > 0
+                and result["price"] > av["entry"] * 0.998
+            )
+
+            should_send = normal_cooldown_ok or quality_upgrade or continuation_alert
+
+            if should_send:
+                if continuation_alert:
+                    reason_send = "استمرار الموجة بعد آخر تنبيه"
+                elif quality_upgrade:
+                    reason_send = "ترقية جودة / Momentum Beast"
+                else:
+                    reason_send = "أول تنبيه للفرصة"
+
+                if result["golden_setup"] or result["momentum_beast"]:
+                    title = "🔥🚀 V32.4 GOLDEN STOCK ALERT 🚀🔥"
+                    note = "فرصة ذهبية عالية الجودة"
+                else:
+                    title = "✅🚀 V32.4 GOOD STOCK ALERT 🚀✅"
+                    note = "فرصة جيدة بجودة مقبولة"
+
+                warnings_text = (
+                    " | ".join(result["quality_warnings"][:3])
+                    if result["quality_warnings"]
+                    else "القيم ممتازة"
+                )
+
+                top_reasons = "\n".join(["- " + r for r in result["reasons"][:6]])
+
+                msg = f"""
+{title}
+
+📈 السهم: {stock}
+⏰ الوقت KSA: {now_ksa}
+🔁 سبب الإرسال: {reason_send}
+
+💰 السعر الحالي: {result['price']:.2f}
+
+🎯 الهدف المتوقع: {result['target']:.2f}
+({result['target_pct']*100:.2f}%)
+
+🛑 وقف المتابعة: {result['stop']:.2f}
+({STOP_LOSS*100:.2f}%)
+
+🔥 السكور: {score}/100
+📌 النوع: {note}
+
+🐺 Momentum Beast: {'YES 🔥🔥' if result['momentum_beast'] else 'NO'}
+🏆 جودة الفرصة: {result['quality_label']}
+📊 Real Quality Score: {result['real_score']}/9
+
+📊 التحليل المختصر:
+- {result['market_reason']}
+- RSI 1m: {result['rsi1']:.1f}
+- RSI 5m: {result['rsi5']:.1f}
+- ADX: {result['adx']:.1f}
+- RVOL: {result['relative_volume']:.2f}x
+- VWAP Distance: {result['vwap_distance']*100:.2f}%
+- Move 3m: {result['move_3m']*100:.2f}%
+- Move 5m: {result['move_5m']*100:.2f}%
+- Relative Strength: {result['relative_strength']*100:.2f}%
+
+✅ أهم الأسباب:
+{top_reasons}
+
+🧠 خطة السكالب:
+- الحالة: {av['status']}
+- الدخول الأفضل: فوق {av['entry']:.2f}
+- الهدف الأول: {av['target1']:.2f}
+- الهدف الثاني: {av['target2']:.2f}
+- وقف السكالب: {av['stop']:.2f}
+- ملاحظة: {av['advice']}
+
+⚠️ ملاحظات: {warnings_text}
+⚠️ تنبيه فقط، القرار النهائي عليك.
+"""
+
                 send(msg)
                 print(msg, flush=True)
 
                 last_alert_time[stock] = now_time
                 last_alert_snapshot[stock] = {
-                    "score": result["score"],
+                    "score": score,
                     "price": result["price"],
-                    "rank": result["alert_rank"],
-                    "beast": result["momentum_beast"],
-                    "real_score": result["real_score"],
+                    "beast": beast_now,
+                    "real_score": result["real_score"]
                 }
 
             del result
