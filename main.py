@@ -11,12 +11,12 @@ TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
 CHAT_ID = "1016589957"
 
 WATCHLIST = [
-    "TSLA", "NVDA", "AMD","AVGO",
+    "TSLA", "NVDA", "AMD", "AVGO",
     "AMZN", "AAPL", "MSFT"
 ]
 
 CHECK_SECONDS = 30
-ALERT_COOLDOWN = 1800
+ALERT_COOLDOWN = 800
 
 MIN_SEND_SCORE = 110
 MIN_REAL_SCORE_TO_SEND = 5
@@ -49,7 +49,7 @@ def send(msg):
 
 print("BOT FILE STARTED", flush=True)
 print("SERVICE READY", flush=True)
-send("✅ V35 STOCK BOT STARTED - ROCKET NOW + ENTRY NOW + RVOL FIX")
+send("✅ V35.2 STOCK BOT STARTED - EARLY BEAST GOOD SETUP FIX")
 
 
 def market_open():
@@ -124,13 +124,6 @@ def vwap(df):
 
 
 def calc_relative_volume(volume1):
-    """
-    إصلاح RVOL:
-    - يتجاهل الشمعة الحالية لأنها أحياناً ناقصة أو صفر.
-    - يستخدم آخر شمعة مكتملة غير صفرية.
-    - يحسب المتوسط من آخر 30 شمعة غير صفرية.
-    - إذا بيانات Yahoo سيئة يرجع 1.0 لكن يعلّمنا أن الفوليوم غير مؤكد.
-    """
     try:
         vol = volume1.copy().fillna(0).astype(float)
 
@@ -220,17 +213,34 @@ def real_quality_filter(move_1m, move_3m, move_5m, relative_strength, relative_v
         and vwap_distance > 0
     )
 
+    early_beast_good_setup = (
+        real_score >= 4
+        and move_1m > 0
+        and move_3m >= 0.004
+        and move_5m >= 0.006
+        and relative_strength >= 0.004
+        and vwap_distance > 0
+        and vwap_distance <= 0.014
+        and 50 <= rsi1 <= 82
+        and 0.0015 <= atr_pct <= 0.018
+    )
+
     golden_setup = real_score >= 7 or aggressive_momentum
-    good_setup = real_score >= 5
+    good_setup = real_score >= 5 or early_beast_good_setup
 
     if golden_setup:
         quality_label = "🔥 GOLDEN SETUP"
+    elif early_beast_good_setup:
+        quality_label = "🚀 EARLY BEAST GOOD SETUP"
     elif good_setup:
         quality_label = "✅ GOOD SETUP"
     else:
         quality_label = "⚠️ WEAK / WATCH ONLY"
 
-    return real_score, golden_setup, good_setup, aggressive_momentum, quality_label, warnings
+    if early_beast_good_setup and real_score < 5:
+        warnings.append("🔥 مرّ بسبب زخم مبكر قوي رغم أن Real Score أقل من 5")
+
+    return real_score, golden_setup, good_setup, aggressive_momentum, early_beast_good_setup, quality_label, warnings
 
 
 def assistant_scalp_view(price, high1, low1, close1, vwap_value, vwap_distance, move_1m, move_3m, move_5m, rsi1):
@@ -282,16 +292,30 @@ def classify_signal(result):
     price = result["price"]
     entry = av["entry"]
 
-    rocket_now = (
-        result["momentum_beast"]
-        and result["real_score"] >= 6
-        and result["relative_strength"] > 0.0025
-        and result["move_1m"] >= 0.0008
-        and result["move_3m"] >= 0.002
-        and result["move_5m"] >= 0.003
-        and 0.0003 <= result["vwap_distance"] <= 0.012
+    early_beast_signal = (
+        result["early_beast_good_setup"]
+        and result["relative_strength"] >= 0.004
+        and result["move_3m"] >= 0.004
+        and result["move_5m"] >= 0.006
+        and result["vwap_distance"] > 0
+        and result["vwap_distance"] <= 0.014
         and 50 <= result["rsi1"] <= 82
-        and result["market_reason"] != "السوق ضعيف شوي" or (
+        and result["market_reason"] != "السوق ضعيف شوي"
+    )
+
+    rocket_now = (
+        (
+            result["momentum_beast"]
+            and result["real_score"] >= 6
+            and result["relative_strength"] > 0.0025
+            and result["move_1m"] >= 0.0008
+            and result["move_3m"] >= 0.002
+            and result["move_5m"] >= 0.003
+            and 0.0003 <= result["vwap_distance"] <= 0.012
+            and 50 <= result["rsi1"] <= 82
+            and result["market_reason"] != "السوق ضعيف شوي"
+        )
+        or (
             result["momentum_beast"]
             and result["aggressive_momentum"]
             and result["relative_strength"] > 0.004
@@ -299,11 +323,12 @@ def classify_signal(result):
             and result["vwap_distance"] <= 0.014
             and result["rsi1"] <= 84
         )
+        or early_beast_signal
     )
 
     entry_now = (
         price >= entry
-        and result["real_score"] >= 6
+        and (result["real_score"] >= 6 or result["early_beast_good_setup"])
         and result["momentum_beast"]
         and result["relative_strength"] > 0.002
         and result["move_3m"] > 0.002
@@ -315,6 +340,8 @@ def classify_signal(result):
         return "🔥 ENTRY NOW", "تم تحقق الكسر أو تجاوز نقطة الدخول. دخول تأكيدي."
 
     if rocket_now:
+        if result["early_beast_good_setup"] and result["real_score"] < 6:
+            return "🚀 ROCKET NOW", "زخم مبكر قوي جداً. تم تمريره قبل اكتمال Real Score حتى لا تتأخر الفرصة."
         return "🚀 ROCKET NOW", "زخم مبكر قوي قبل أو أثناء الانفجار. دخول هجومي بحجم أقل."
 
     return "👀 WATCH ONLY", "ليست دخول الآن. فقط مراقبة."
@@ -450,7 +477,7 @@ def analyze(stock):
         late_momentum = assistant_view["late_momentum"]
         trade_timing = "⚠️ قوي لكن لا تطارد" if late_momentum else "✅ توقيت مناسب"
 
-        real_score, golden_setup, good_setup, aggressive_momentum, quality_label, quality_warnings = real_quality_filter(
+        real_score, golden_setup, good_setup, aggressive_momentum, early_beast_good_setup, quality_label, quality_warnings = real_quality_filter(
             move_1m, move_3m, move_5m,
             relative_strength, relative_volume, volume_confirmed,
             adx, atr_pct, vwap_distance,
@@ -545,16 +572,24 @@ def analyze(stock):
             reasons.append("تذبذب مناسب للسكالب")
 
         momentum_beast = (
-            real_score >= 6
-            and price > vwap_value
-            and move_3m > 0.0015
-            and relative_strength > 0.001
-            and 45 <= rsi1 <= 82
-        ) or aggressive_momentum
+            (
+                real_score >= 6
+                and price > vwap_value
+                and move_3m > 0.0015
+                and relative_strength > 0.001
+                and 45 <= rsi1 <= 82
+            )
+            or aggressive_momentum
+            or early_beast_good_setup
+        )
 
         if momentum_beast:
             score += 20
             reasons.append("🔥 Momentum Beast: زخم قوي بجودة مقبولة")
+
+        if early_beast_good_setup:
+            score += 15
+            reasons.append("🚀 Early Beast: تم تمرير الفرصة مبكراً حتى لا تتأخر")
 
         if late_momentum:
             reasons.append("⚠️ Late Momentum: السهم تحرك كثير، لا تطارد إلا إذا التصنيف ROCKET/ENTRY واضح")
@@ -587,6 +622,7 @@ def analyze(stock):
             "real_score": real_score,
             "golden_setup": golden_setup,
             "good_setup": good_setup,
+            "early_beast_good_setup": early_beast_good_setup,
             "aggressive_momentum": aggressive_momentum,
             "momentum_beast": momentum_beast,
             "quality_label": quality_label,
@@ -600,7 +636,7 @@ def analyze(stock):
         result["signal_reason"] = signal_reason
 
         print(
-            f"{stock} RVOL DEBUG | confirmed={volume_confirmed} | vol_now={vol_now:.0f} | vol_avg={vol_avg:.0f} | rvol={relative_volume:.2f}x | signal={signal_type}",
+            f"{stock} RVOL DEBUG | confirmed={volume_confirmed} | vol_now={vol_now:.0f} | vol_avg={vol_avg:.0f} | rvol={relative_volume:.2f}x | real={real_score}/9 | early_beast={early_beast_good_setup} | signal={signal_type}",
             flush=True
         )
 
@@ -617,12 +653,12 @@ def analyze(stock):
 
 
 send(
-    "🚀 V35 STOCK SCANNER ONLINE 🚀\n"
-    "✅ ROCKET NOW added\n"
-    "✅ ENTRY NOW added\n"
-    "✅ RVOL fixed using non-zero completed candles\n"
-    "✅ Yahoo volume confirmation added\n"
-    "✅ Rocket/Entry cooldown upgrade enabled"
+    "🚀 V35.2 STOCK SCANNER ONLINE 🚀\n"
+    "✅ Early Beast Good Setup added\n"
+    "✅ Good Setup no longer blocks strong momentum\n"
+    "✅ Rocket Now can trigger earlier\n"
+    "✅ RVOL fix active\n"
+    "✅ Cooldown 800 seconds"
 )
 
 while True:
@@ -632,7 +668,7 @@ while True:
 
         if time.time() - last_heartbeat >= 3600:
             send(
-                f"👀 V35 STOCK BOT STILL RUNNING\n"
+                f"👀 V35.2 STOCK BOT STILL RUNNING\n"
                 f"⏰ KSA: {now_ksa}\n"
                 f"📡 البوت حي ويراقب الأسهم"
             )
@@ -663,24 +699,29 @@ while True:
             av = result["assistant_view"]
 
             if not result["good_setup"]:
-                print(f"{stock}: SKIPPED - NOT GOOD SETUP", flush=True)
+                print(
+                    f"{stock}: SKIPPED - NOT GOOD SETUP | real={result['real_score']}/9 | "
+                    f"rvol={result['relative_volume']:.2f} | move3={result['move_3m']*100:.2f}% | "
+                    f"move5={result['move_5m']*100:.2f}% | rs={result['relative_strength']*100:.2f}%",
+                    flush=True
+                )
                 del result
                 gc.collect()
                 continue
 
-            if result["real_score"] < MIN_REAL_SCORE_TO_SEND:
+            if result["real_score"] < MIN_REAL_SCORE_TO_SEND and not result["early_beast_good_setup"]:
                 print(f"{stock}: SKIPPED - REAL SCORE LOW {result['real_score']}/9", flush=True)
                 del result
                 gc.collect()
                 continue
 
-            if score < MIN_SEND_SCORE:
+            if score < MIN_SEND_SCORE and not result["early_beast_good_setup"]:
                 print(f"{stock}: SKIPPED - SCORE LOW {score}", flush=True)
                 del result
                 gc.collect()
                 continue
 
-            if result["signal_type"] == "👀 WATCH ONLY":
+            if result["signal_type"] == "👀 WATCH ONLY" and not result["early_beast_good_setup"]:
                 print(f"{stock}: SKIPPED - WATCH ONLY", flush=True)
                 del result
                 gc.collect()
@@ -711,12 +752,17 @@ while True:
                 and result["price"] >= last_price * 1.008
             )
 
-            if normal_cooldown_ok or signal_upgrade or elite_upgrade or big_price_continuation:
+            early_beast_new_alert = (
+                result["early_beast_good_setup"]
+                and result["signal_type"] != "👀 WATCH ONLY"
+            )
+
+            if normal_cooldown_ok or signal_upgrade or elite_upgrade or big_price_continuation or early_beast_new_alert:
                 if result["signal_type"] == "🚀 ROCKET NOW":
-                    title = "🚀🐺 V35 ROCKET NOW ALERT 🐺🚀"
+                    title = "🚀🐺 V35.2 ROCKET NOW ALERT 🐺🚀"
                     note = "انفجار مبكر - دخول هجومي بحجم أقل"
                 else:
-                    title = "🔥✅ V35 ENTRY NOW ALERT ✅🔥"
+                    title = "🔥✅ V35.2 ENTRY NOW ALERT ✅🔥"
                     note = "دخول تأكيدي بعد تحقق الشرط"
 
                 quality_warnings_text = (
