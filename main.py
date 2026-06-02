@@ -12,7 +12,7 @@ CHAT_ID = "1016589957"
 
 WATCHLIST = [
     "TSLA", "NVDA", "AMD", 
-    "AMZN", "AAPL", "MSFT"
+    "SMCI", "PLTR",
 ]
 
 CHECK_SECONDS = 30
