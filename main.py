@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
-TOKEN = "8897393036:AAEucfnbK2HdESXv-D6Sgd5RDITT9LTBA4A"
+TOKEN = "8897393036:AAFMGu7wViXfWkSOjMsE9GFS01icMpOyMyM"
 CHAT_ID = "1016589957"
 
 WATCHLIST = [
