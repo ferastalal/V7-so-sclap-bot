@@ -114,7 +114,7 @@ R:R={r['levels']['rr']}x | MACD Cross: {r['macd_cross']}
         )
         if response.status_code == 200:
             return response.json()["content"][0]["text"].strip()
-        return "return "⚠️ Claude error""
+        return "Claude error"
     except Exception as e:
         log.error(f"Claude error: {e}")
         return ""
