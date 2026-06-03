@@ -150,3 +150,4 @@ if now.weekday() >= 5:
 return False
 t = now.strftime("%H:%M")
 return "16:00" <= t <= "16:10"
+=
