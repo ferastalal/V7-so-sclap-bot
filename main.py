@@ -30,7 +30,7 @@ log = logging.getLogger("ScalpBot")
 # # Chat ID
 # # export TELEGRAM_TOKEN=""
 # # export TELEGRAM_CHAT_ID="chat id "
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "8948332078:AAEYXuDitmQfB9iYB-kF8lkW-5Qfimab0QI"
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "8948332078:AAEYXuDitmQfB9iYB-kF8lkW-5QfimabOQI")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1016589957")
 # # - -
 WATCHLIST = ["TSLA", "NVDA", "AMD", "SMCI", "PLTR"]
