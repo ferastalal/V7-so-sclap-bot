@@ -187,8 +187,8 @@ qqq_c = qqq["Close"].squeeze()
 spy_move = (float(spy_c.iloc[-1]) - float(spy_c.iloc[-6])) / float(spy_c.iloc[-6])
 qqq_move = (float(qqq_c.iloc[-1]) - float(qqq_c.iloc[-6])) / float(qqq_c.iloc[-6])
 avg = (spy_move + qqq_move) / 2
-label = " value = (avg, label)
-" if avg > 0.0003 else (" " if avg < -0.0003 else " ")
+label = "Market up" if avg > 0.0003 else ("Market weak" if avg < -0.0003 else "Market neutral")
+value = (avg, label)
 market_cache.update({"value": value, "time": now_time})
 del spy, qqq
 gc.collect()
