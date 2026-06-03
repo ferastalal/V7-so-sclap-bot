@@ -339,7 +339,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
 
     aggressive = (score >= 5 and adx >= 28 and move_5m > 0.003
                   and rel_strength > 0.0015 and vwap_dist > 0)
-    golden = (score >= 7 or aggressive) and adx >= 20 and volume_ratio >= 1.2  # Golden الحقيقي من 7/9
+    golden = (score >= 7 or aggressive) and adx >= 20 and rel_vol >= 1.2  # Golden الحقيقي من 7/9
     good   = score >= 5
 
     label = "🥇 GOLDEN" if golden else ("✅ GOOD" if good else "⚠️ WEAK")
