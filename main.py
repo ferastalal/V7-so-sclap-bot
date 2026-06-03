@@ -107,7 +107,7 @@ R:R={r['levels']['rr']}x | MACD Cross: {r['macd_cross']}
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 150,
+                "max_tokens": 250,
                 "messages": [{"role": "user", "content": prompt}]
             },
             timeout=15
