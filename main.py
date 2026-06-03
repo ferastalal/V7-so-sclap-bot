@@ -19,7 +19,6 @@ import pandas as pd
 from datetime import datetime, date
 import pytz
 import logging
-- ) ( - # #
 import daily_summary as ds
 # # - Logging -
 logging.basicConfig(
