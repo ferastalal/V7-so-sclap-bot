@@ -19,33 +19,33 @@ import pandas as pd
 from datetime import datetime, date
 import pytz
 import logging
-─────────────────────── ﻧﻈﺎم اﻟﻨﺘﺎﺋﺞ اﻟﯿﻮﻣﯿﺔ )ﻣﻠﻒ ﻣﺴﺘﻘﻞ( ─── #
+- ﻧﻈﺎم اﻟﻨﺘﺎﺋﺞ اﻟﯿﻮﻣﯿﺔ )ﻣﻠﻒ ﻣﺴﺘﻘﻞ( - #
 import daily_summary as ds
-─────────────────────────────────────────── Logging إﻋﺪاد ─── #
+- Logging إﻋﺪاد - #
 logging.basicConfig(
 level=logging.INFO,
 format="%(asctime)s | %(levelname)s | %(message)s",
 handlers=[logging.StreamHandler()]
 )
 log = logging.getLogger("ScalpBot")
-─────────────────────────────────────── اﻹﻋﺪادات اﻷﺳﺎﺳﯿﺔ ─── #
+- اﻹﻋﺪادات اﻷﺳﺎﺳﯿﺔ - #
 ﻓﻲ ﻣﺘﻐﯿﺮات ﺑﯿﺌﺔ ﻷﻣﺎن أﻓﻀﻞ Chat ID ﺿﻊ اﻟﺘﻮﻛﻦ واﻟـ #
 "ﺗﻮﻛﻨﻚ"=export TELEGRAM_TOKEN #
 "اﻟﺨﺎص ﺑﻚ export TELEGRAM_CHAT_ID="chat id #
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "8948332078:AAEYXuDitmQfB9iYB-kF8lkW-5Qfimab0QI"
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1016589957")
-──────────────────────────────────────────── ﻗﺎﺋﻤﺔ اﻷﺳﮭﻢ ─── #
+- ﻗﺎﺋﻤﺔ اﻷﺳﮭﻢ - #
 WATCHLIST = ["TSLA", "NVDA", "AMD", "SMCI", "PLTR"]
-───────────────────────────────────────────── ﺗﻮﻗﯿﺖ اﻟﻔﺤﺺ ─── #
+- ﺗﻮﻗﯿﺖ اﻟﻔﺤﺺ - #
 ﻓﺤﺺ ﻛﻞ 20 ﺛﺎﻧﯿﺔ ﻟﻌﺪم ﺗﻔﻮﯾﺖ اﻟﺒﺪاﯾﺔ # 20 = CHECK_SECONDS
 ﺑﯿﻦ ﺗﻨﺒﯿﮭﯿﻦ ﻋﻠﻰ ﻧﻔﺲ اﻟﺴﮭﻢ cooldown دﻗﺎﺋﻖ 10 # 600 = ALERT_COOLDOWN
-───────────────────────────────────────────── ﺣﺪود اﻟﺴﻜﻮر ─── #
+- ﺣﺪود اﻟﺴﻜﻮر - #
 ﺣﺪ أدﻧﻰ ﻟﻠﺣﺪ أﻧﻰ ﻟﺠﻮدة اﺴﻜﻮر 1 = MIN_SCORE
-ﻟﻔﺮﺻﺔ )ﻣﻦ 9( #────────────────────────────────────── أھﺪاف ووﻗﻒ اﻟﺴﻜﺎﻟﺐ ─── #
+ﻟﻔﺮﺻﺔ )ﻣﻦ 9( #- أھﺪاف ووﻗﻒ اﻟﺴﻜﺎﻟﺐ - #
 ھﺪف ﻋﺎدي %0.8 # 0.008 = TARGET_NORMAL
 ھﺪف ذھﺒﻲ %1.2 # 0.012 = TARGET_GOLDEN
 وﻗﻒ %0.3 # 0.003 = STOP_LOSS
-─────────────────────────────────────── أوﻗﺎت اﻟﺰﺧﻢ اﻟﻘﻮي ─── #
+- أوﻗﺎت اﻟﺰﺧﻢ اﻟﻘﻮي - #
 أول ﺳﺎﻋﺔ وﻧﺼﻒ ﺑﻌﺪ اﻻﻓﺘﺘﺎح + آﺧﺮ ﺳﺎﻋﺔ ﻗﺒﻞ اﻹﻏﻼق #
 POWER_SESSIONS = [
 ﻣﻮﺟﺔ اﻻﻓﺘﺘﺎح )ﻧﺒﺪأ 09:35 ﺑﻌﺪ أول 5 دﻗﺎﺋﻖ( # ,)"11:00" ,"09:35"(
@@ -54,15 +54,15 @@ POWER_SESSIONS = [
 وﻗﺖ ﻋﺎدي، ﻓﻼﺗﺮ )"15:00" ,"11:00"( = NORMAL_SESSION
 ﺎﺋﻖ ﺑﻌﺪ اﻻﻓﺘﺘﺎح # 5 =OPENING_BLOCK
 MAX_HISTORY_BARS = 200
-───────────────────────────────────────────────── اﻟﺬاﻛﺮة ─── #
+- اﻟﺬاﻛﺮة - #
 last_alert_time = {}
 last_alert_snapshot = {}
 last_heartbeat = time.time()
-───────────────────────────────────────────── ﻟﻠﺴﻮق Cache ─── #
+- ﻟﻠﺴﻮق Cache - #
 })"ﻏﯿﺮ واﺿﺢ" ,0.0( :"market_cache = {"time": 0, "value
-══════════════════════════════════════════════════════════════ #
+- #
 # TELEGRAM
-══════════════════════════════════════════════════════════════ #
+- #
 def send(msg: str):
 try:
 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -75,9 +75,9 @@ if r.status_code != 200:
 log.warning(f"Telegram error: {r.status_code} - {r.text[:100]}")
 except Exception as e:
 log.error(f"Telegram send failed: {e}")
-══════════════════════════════════════════════════════════════ #
+- #
 وﻗﺖ اﻟﺴﻮق #
-══════════════════════════════════════════════════════════════ #
+- #
 def get_ny_time():
 return datetime.now(pytz.timezone("America/New_York"))
 def get_ksa_time():
@@ -118,9 +118,9 @@ if now.weekday() >= 5:
 return False
 t = now.strftime("%H:%M")
 return "16:00" <= t <= "16:10"
-══════════════════════════════════════════════════════════════ #
+- #
 ﺗﻨﺰﯾﻞ اﻟﺒﯿﺎﻧﺎت #
-══════════════════════════════════════════════════════════════ #
+- #
 def clean_columns(df, stock):
 try:
 if isinstance(df.columns, pd.MultiIndex):
@@ -144,9 +144,9 @@ return df if df is not None else pd.DataFrame()
 except Exception as e:
 log.error(f"Download error {stock} {interval}: {e}")
 return pd.DataFrame()
-══════════════════════════════════════════════════════════════ #
+- #
+- #
 )ﻣﻦ ﺑﺪاﯾﺔ ﺟﻠﺴﺔ اﻟﯿﻮم( VWAP #
-══════════════════════════════════════════════════════════════ #
 def calc_vwap(df: pd.DataFrame) -> float:
 """ﺣﻘﯿﻘﻲ ﻣﻦ ﺑﺪاﯾﺔ ﺟﻠﺴﺔ اﻟﯿﻮم VWAP"""
 try:
@@ -170,9 +170,9 @@ return float((typical * volume).sum() / volume.sum())
 except Exception:
 close = df["Close"].squeeze()
 return float(close.iloc[-1])
-══════════════════════════════════════════════════════════════ #
+- #
 )SPY + QQQ( ﺣﺎﻟﺔ اﻟﺴﻮق اﻟﻌﺎم #
-══════════════════════════════════════════════════════════════ #
+- #
 def market_move():
 try:
 now_time = time.time()
@@ -197,9 +197,9 @@ return value
 except Exception as e:
 log.error(f"Market move error: {e}")
 "ﺗﻌﺬر ﻓﺤﺺ اﻟﺴﻮق" ,0.0 return
-══════════════════════════════════════════════════════════════ #
+- #
+- #
 )real_quality_filter( ﻓﻠﺘﺮ اﻟﺠﻮدة اﻟﺤﻘﯿﻘﯿﺔ #
-══════════════════════════════════════════════════════════════ #
 def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
 rel_volume, adx, atr_pct, vwap_dist, rsi1, rsi5,
 power_session: bool):
@@ -261,9 +261,9 @@ label = " GOOD SETUP"
 else:
 label = " WEAK"
 return score, golden, good, aggressive, label, warnings
-══════════════════════════════════════════════════════════════ #
+- #
 ﻛﺸﻒ ﻧﻤﻂ اﻟﺪﺧﻮل #
-══════════════════════════════════════════════════════════════ #
+- #
 def detect_entry_pattern(close1, high1, low1, price, vwap_value, ema9, ema21):
 """breakout / vwap bounce / momentum continuation :ﯾﻜﺸﻒ ﻧﻮع اﻟﻔﺮﺻﺔ"""
 high_20 = float(high1.tail(20).max())
@@ -284,9 +284,9 @@ elif above_vwap and near_break:
 return " VWAP Breakout", 15
 else:
 return " Watch", 5
-══════════════════════════════════════════════════════════════ #
+- #
 ﻧﻘﺎط اﻟﺪﺧﻮل واﻷھﺪاف #
-══════════════════════════════════════════════════════════════ #
+- #
 def scalp_levels(price, high1, low1, vwap_value, golden: bool):
 resistance = float(high1.tail(15).max())
 support = float(low1.tail(15).min())
@@ -306,9 +306,9 @@ return {
 "resistance": round(resistance, 2),
 "rr": rr,
 }
-══════════════════════════════════════════════════════════════ #
+- #
 اﻟﺘﺤﻠﯿﻞ اﻟﺮﺋﯿﺴﻲ #
-══════════════════════════════════════════════════════════════ #
+- #
 def analyze(stock: str):
 try:
 df1 = download(stock, "2d", "1m")
@@ -323,7 +323,7 @@ volume1 = df1["Volume"].squeeze()
 close5 = df5["Close"].squeeze()
 close15 = df15["Close"].squeeze()
 price = float(close1.iloc[-1])
-# ── EMAs ──────────────────────────────────────────────
+# - EMAs -
 ema9_1 = float(ta.trend.EMAIndicator(close1, window=9 ).ema_indicator().iloc[-1])
 ema21_1 = float(ta.trend.EMAIndicator(close1, window=21).ema_indicator().iloc[-1])
 ema50_1 = float(ta.trend.EMAIndicator(close1, window=50).ema_indicator().iloc[-1])
@@ -331,42 +331,42 @@ ema9_5 = float(ta.trend.EMAIndicator(close5, window=9 ).ema_indicator().iloc[-1]
 ema21_5 = float(ta.trend.EMAIndicator(close5, window=21).ema_indicator().iloc[-1])
 ema9_15 = float(ta.trend.EMAIndicator(close15, window=9 ).ema_indicator().iloc[-1])
 ema21_15= float(ta.trend.EMAIndicator(close15, window=21).ema_indicator().iloc[-1])
-# ── RSI ───────────────────────────────────────────────
+# - RSI -
 rsi1 = float(ta.momentum.RSIIndicator(close1, window=14).rsi().iloc[-1])
 rsi5 = float(ta.momentum.RSIIndicator(close5, window=14).rsi().iloc[-1])
-# ── MACD ──────────────────────────────────────────────
+# - MACD -
 macd = ta.trend.MACD(close1)
 macd_now = float(macd.macd().iloc[-1])
 macd_sig = float(macd.macd_signal().iloc[-1])
 macd_hist = macd_now - macd_sig
 macd_prev = float(macd.macd().iloc[-2])
 macd_cross = macd_now > macd_sig and macd_prev <= float(macd.macd_signal().iloc[-2])
-# ── ADX ───────────────────────────────────────────────
+# - ADX -
 adx = float(ta.trend.ADXIndicator(high=high1, low=low1, close=close1, window=14).adx(
-# ── ATR ───────────────────────────────────────────────
+# - ATR -
 atr = float(ta.volatility.AverageTrueRange(high=high1, low=low1, close=close1, wi
 atr_pct = atr / price
-──────────────── )آﺧﺮ ﺷﻤﻌﺔ ﻣﻜﺘﻤﻠﺔ( Relative Volume ── #
+- )آﺧﺮ ﺷﻤﻌﺔ ﻣﻜﺘﻤﻠﺔ( Relative Volume - #
 if len(volume1) < 32:
 return None
 vol_last = float(volume1.iloc[-2])
 vol_avg = float(volume1.iloc[-32:-2].mean())
 rel_vol = (vol_last / vol_avg) if vol_avg > 0 else 0.0
 dollar_vol = price * vol_last
-─────────────────────────────────── اﻟﺤﺮﻛﺎت اﻟﺴﻌﺮﯾﺔ ── #
+- اﻟﺤﺮﻛﺎت اﻟﺴﻌﺮﯾﺔ - #
 move_1m = (price - float(close1.iloc[-2])) / float(close1.iloc[-2])
 move_3m = (price - float(close1.iloc[-4])) / float(close1.iloc[-4])
 move_5m = (price - float(close1.iloc[-6])) / float(close1.iloc[-6])
 move_15m = (price - float(close1.iloc[-16])) / float(close1.iloc[-16])
-──────────────────────────────────────── ﺣﻘﯿﻘﻲ VWAP ── #
+- ﺣﻘﯿﻘﻲ VWAP - #
 vwap_value = calc_vwap(df1)
 vwap_dist = (price - vwap_value) / vwap_value
-─────────────────────────────────────── اﻟﺴﻮق اﻟﻌﺎم ── #
+- اﻟﺴﻮق اﻟﻌﺎم - #
 spy_move, market_label = market_move()
 rel_strength = move_5m - spy_move
-───────── )ﻣﻘﺎرﻧﺔ آﺧﺮ ﺷﻤﻌﺘﯿﻦ( Momentum Acceleration ── #
+- )ﻣﻘﺎرﻧﺔ آﺧﺮ ﺷﻤﻌﺘﯿﻦ( Momentum Acceleration - #
 momentum_acc = move_1m > (price - float(close1.iloc[-3])) / float(close1.iloc[-3])
-══ ﻓﻼﺗﺮ اﻹﻗﺼﺎء اﻟﻤﺒﻜﺮة )ﻗﺒﻞ أي ﺣﺴﺎب ﺛﻘﯿﻞ( ══ #
+- ﻓﻼﺗﺮ اﻹﻗﺼﺎء اﻟﻤﺒﻜﺮة )ﻗﺒﻞ أي ﺣﺴﺎب ﺛﻘﯿﻞ( - #
 power = is_power_session()
 ﺣﺪود ﻣﺘﺴﺎھﻠﺔ ﻓﻲ وﻗﺖ اﻟﺰﺧﻢ #
 max_rsi1 = 85
@@ -400,7 +400,7 @@ if dollar_vol < 200000:
 ds.log_filtered()
 log.info(f"{stock}: FILTERED dollar_vol low")
 return None
-──────────────────────────────── Liquidity Grab ﻛﺸﻒ ── #
+- Liquidity Grab ﻛﺸﻒ - #
 high_20 = float(high1.tail(20).max())
 near_break = price >= high_20 * 0.997
 last_high = float(high1.iloc[-1])
@@ -417,17 +417,17 @@ if breakout_failed or fast_rejection or weak_break_vol or fake_wick_break:
 ds.log_filtered()
 log.info(f"{stock}: LIQUIDITY GRAB filtered")
 return None
-─────────────────────────────────────── ﺟﻮدة اﻟﻔﺮﺻﺔ ── #
+- ﺟﻮدة اﻟﻔﺮﺻﺔ - #
 real_score, golden, good, aggressive, quality_label, warnings = real_quality_filter(
 move_1m, move_3m, move_5m, rel_strength,
 rel_vol, adx, atr_pct, vwap_dist, rsi1, rsi5,
 power_session=power
 )
-─────────────────────────────────────── ﻧﻤﻂ اﻟﺪﺧﻮل ── #
+- ﻧﻤﻂ اﻟﺪﺧﻮل - #
 pattern_label, pattern_score = detect_entry_pattern(
 close1, high1, low1, price, vwap_value, ema9_1, ema21_1
 )
-══ ﺣﺴﺎب اﻟﺴﻜﻮر اﻟﻜﻠﻲ ══ #
+- ﺣﺴﺎب اﻟﺴﻜﻮر اﻟﻜﻠﻲ - #
 score = 0
 reasons = []
 ﻧﻤﻂ اﻟﺪﺧﻮل #
@@ -501,7 +501,7 @@ reasons.append(f" {session_label()}")
 if golden:
 score += 15
 reasons.append(" Golden Setup confirmed")
-─────────────────────────────────── ﻣﺴﺘﻮﯾﺎت اﻟﺪﺧﻮل ── #
+- ﻣﺴﺘﻮﯾﺎت اﻟﺪﺧﻮل - #
 levels = scalp_levels(price, high1, low1, vwap_value, golden)
 del df1, df5, df15
 gc.collect()
@@ -540,9 +540,9 @@ log.error(f"Analyze error {stock}: {e}")
 return None
 finally:
 gc.collect()
-══════════════════════════════════════════════════════════════ #
+- #
 ﺑﻨﺎء رﺳﺎﻟﺔ اﻟﺘﻨﺒﯿﮫ #
-══════════════════════════════════════════════════════════════ #
+- #
 def build_alert_message(r: dict) -> str:
 lv = r["levels"]
 ﻣﻤﺘﺎزة " w = "\n".join([f" {x}" for x in r["warnings"]]) if r["warnings"] else
@@ -555,7 +555,7 @@ msg = f"""
 {get_ksa_time()} KSA
 >b>{r['price']:.2f}</b< :اﻟﺴﻌﺮ
 {r['market_label']}
-━━━━━━━━━━━━━━━━━
+-
 <b>ﻧﻘﺎط اﻟﺘﺪاول:</b>
 >b>{lv['entry']:.2f}</b< :اﻟﺪﺧﻮل
 >b>{lv['target']:.2f}</b< :اﻟﮭﺪف
@@ -563,21 +563,21 @@ msg = f"""
 }lv['support']:.2f{ :اﻟﺪﻋﻢ
 }lv['resistance']:.2f{ :اﻟﻤﻘﺎوﻣﺔ
 {rr_emoji} R:R = <b>{lv['rr']:.1f}x</b>
-━━━━━━━━━━━━━━━━━
-{(' {(' {(' <b>ﺟﻮدة اﻟﻔﺮﺻﺔ:</b> {r['quality_label']}
+-
+{(' {(' {(' -
+<b>ﺟﻮدة اﻟﻔﺮﺻﺔ:</b> {r['quality_label']}
 Real Score: {r['real_score']}/9
 Score: {r['score']}
 Aggressive Momentum') if r['aggressive'] else ''}
 MACD Cross اﻵن!') if r['macd_cross'] else ''}
 Momentum ﻣﺘﺴﺎرع') if r['momentum_acc'] else ''}
-━━━━━━━━━━━━━━━━━
 <b>اﻟﻘﺮاءات:</b>
 RSI 1m: {r['rsi1']:.1f} | RSI 5m: {r['rsi5']:.1f}
 ADX: {r['adx']:.1f} | RVol: {r['rel_vol']:.2f}x
 ATR: {r['atr_pct']*100:.2f}% | VWAP Dist: {r['vwap_dist']*100:.2f}%
 Move 1m: {r['move_1m']*100:.2f}% | 3m: {r['move_3m']*100:.2f}% | 5m: {r['move_5m']*100:.2f}
 Rel.Strength vs SPY: {r['rel_strength']*100:.2f}%
-━━━━━━━━━━━━━━━━━
+-
 <b>أﺳﺒﺎب اﻟﺘﻨﺒﯿﮫ:</b>
 {rs}
 <b>ﻣﻼﺣﻈﺎت اﻟﺠﻮدة:</b>
@@ -587,34 +587,34 @@ Rel.Strength vs SPY: {r['rel_strength']*100:.2f}%
 .اﻟﻘﺮار اﻟﻨﮭﺎﺋﻲ ﻋﻠﯿﻚ داﺋﻤﺎ
 """
 return msg.strip()
-══════════════════════════════════════════════════════════════ #
+- #
 اﻟﺤﻠﻘﺔ اﻟﺮﺋﯿﺴﯿﺔ #
-══════════════════════════════════════════════════════════════ #
+- #
 log.info("BOT STARTED")
 ﺣﻘﯿﻘﻲ ﻣﻦ ﺑﺪاﯾﺔ اﻟﺠﻠﺴﺔ n VWAP\ﯾﺮﻛﺰ ﻋﻠﻰ أوﻗﺎت اﻟﺰﺧﻢ b>\n/<ﺗﺸﻐﯿﻞ - send(" <b>SCALP BOT PRO
 while True:
 try:
 now_ksa = get_ksa_time()
-──────────────────────────────── ﻛﻞ ﺳﺎﻋﺔ Heartbeat ── #
+- ﻛﻞ ﺳﺎﻋﺔ Heartbeat - #
 if time.time() - last_heartbeat >= 3600:
 send(f" BOT ALIVE | {now_ksa} KSA | {session_label()}")
 last_heartbeat = time.time()
-────── )daily_summary.py ﻣﻦ( ﻣﻠﺨﺺ ﯾﻮﻣﻲ ﺑﻌﺪ اﻹﻏﻼق ── #
+- )daily_summary.py ﻣﻦ( ﻣﻠﺨﺺ ﯾﻮﻣﻲ ﺑﻌﺪ اﻹﻏﻼق - #
 if ds.should_send_summary():
 ds.send_summary(send)
 log.info("Daily summary sent via daily_summary.py")
-─────────────────────────────────────── اﻟﺴﻮق ﻣﻐﻠﻖ ── #
+- اﻟﺴﻮق ﻣﻐﻠﻖ - #
 if not market_open():
 log.info(f"MARKET CLOSED | {now_ksa}")
 time.sleep(30)
 gc.collect()
 continue
-────────────────────────────────────── أول 5 دﻗﺎﺋﻖ ── #
+- أول 5 دﻗﺎﺋﻖ - #
 if is_opening_block():
 log.info(f"Opening block - waiting | {now_ksa}")
 time.sleep(20)
 continue
-─────────────────────────────────────── ﻓﺤﺺ اﻷﺳﮭﻢ ── #
+- ﻓﺤﺺ اﻷﺳﮭﻢ - #
 for stock in WATCHLIST:
 result = analyze(stock)
 if not result:
@@ -653,7 +653,7 @@ macd_new_cross = result["macd_cross"] and not snap.get("macd_cross", False)
 if not (normal_ok or elite_upgrade or continuation or macd_new_cross):
 log.info(f"{stock}: SKIP cooldown")
 del result; gc.collect(); continue
-───────────────────────────────── إرﺳﺎل اﻟﺘﻨﺒﯿﮫ ── #
+- إرﺳﺎل اﻟﺘﻨﺒﯿﮫ - #
 msg = build_alert_message(result)
 send(msg)
 log.info(f"ALERT SENT: {stock} | score={score} | real={real_score}/9 | {result['q
