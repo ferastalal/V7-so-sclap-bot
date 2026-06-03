@@ -635,7 +635,17 @@ while True:
             try:
                 ds.log_alert(stock=stock, score=score, real_score=real_score,
                              golden=result["golden"], quality_label=result["quality_label"],
-                             price=result["price"], session=result["session"])
+                             price=result["price"], session=result["session"],
+                             entry=result["levels"]["entry"],
+                             target=result["levels"]["target"],
+                             stop=result["levels"]["stop"],
+                             reasons=result["reasons"],
+                             claude_verdict=claude_verdict,
+                             rr=result["levels"]["rr"],
+                             adx=result["adx"],
+                             rsi=result["rsi1"],
+                             vol=result["rel_vol"],
+                             vwap_dist=result["vwap_dist"])
             except: pass
 
             last_alert_time[stock] = now_time
