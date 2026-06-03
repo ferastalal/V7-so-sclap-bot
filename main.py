@@ -35,8 +35,8 @@ log = logging.getLogger("ScalpBot")
 
 TOKEN      = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "1016589957")
-CLAUDE_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
+CLAUDE_KEY = os.environ.get("ANTHROPIC_API_KEY")
+log.info(f"Claude Key: {bool(CLAUDE_KEY)}
 WATCHLIST        = ["TSLA", "NVDA", "AMD", "SMCI", "PLTR"]
 CHECK_SECONDS    = 20
 ALERT_COOLDOWN   = 600
