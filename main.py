@@ -83,7 +83,7 @@ def send(msg: str):
 def claude_analyze(r: dict) -> str:
     try:
         if not CLAUDE_KEY:
-            return ""
+        return "⚠️ No Key"    
         prompt = f"""أنت محلل سكالبينج خبير. حلل هذه الفرصة في سطرين فقط باللغة العربية:
 
 السهم: {r['stock']} | السعر: {r['price']:.2f}
