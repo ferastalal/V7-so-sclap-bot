@@ -4,6 +4,8 @@ import requests
 import time
 import gc
 import pandas as pd
+import json
+import os
 from datetime import datetime
 import pytz
 
@@ -32,6 +34,18 @@ last_alert_time = {}
 last_alert_snapshot = {}
 last_heartbeat = time.time()
 
+# ===============================
+# DAILY VIRTUAL TRADE TRACKING
+# البوت يعتبر نفسه دخل بكل تنبيه
+# ===============================
+DAILY_REPORT_HOUR_KSA = 23
+DAILY_REPORT_MINUTE_KSA = 0
+VIRTUAL_TRADES_FILE = "virtual_trades.json"
+
+virtual_trades = {}
+daily_report_sent_for = None
+
+
 market_cache = {
     "time": 0,
     "value": (0, "السوق غير واضح")
@@ -45,6 +59,182 @@ def send(msg):
         print("TELEGRAM STATUS:", r.status_code, flush=True)
     except Exception as e:
         print("TELEGRAM ERROR:", e, flush=True)
+
+
+def load_virtual_trades():
+    global virtual_trades
+    try:
+        if os.path.exists(VIRTUAL_TRADES_FILE):
+            with open(VIRTUAL_TRADES_FILE, "r", encoding="utf-8") as f:
+                virtual_trades = json.load(f)
+        else:
+            virtual_trades = {}
+    except Exception as e:
+        print("LOAD VIRTUAL TRADES ERROR:", e, flush=True)
+        virtual_trades = {}
+
+
+def save_virtual_trades():
+    try:
+        with open(VIRTUAL_TRADES_FILE, "w", encoding="utf-8") as f:
+            json.dump(virtual_trades, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("SAVE VIRTUAL TRADES ERROR:", e, flush=True)
+
+
+def get_ksa_date():
+    saudi = pytz.timezone("Asia/Riyadh")
+    return datetime.now(saudi).strftime("%Y-%m-%d")
+
+
+def register_virtual_trade(stock, result, score, alert_type, now_ksa):
+    """يسجل التنبيه كصفقة افتراضية مفتوحة."""
+    day = get_ksa_date()
+    virtual_trades.setdefault(day, [])
+
+    trade_id = f"{day}_{stock}_{now_ksa}"
+
+    trade = {
+        "id": trade_id,
+        "date": day,
+        "stock": stock,
+        "alert_time_ksa": now_ksa,
+        "alert_type": alert_type,
+        "entry": round(float(result["price"]), 4),
+        "target": round(float(result["target"]), 4),
+        "stop": round(float(result["stop"]), 4),
+        "target_pct": round(float(result["target_pct"]), 5),
+        "stop_pct": round(float(STOP_LOSS), 5),
+        "score": int(score),
+        "real_score": int(result.get("real_score", 0)),
+        "momentum_beast": bool(result.get("momentum_beast", False)),
+        "aggressive_momentum": bool(result.get("aggressive_momentum", False)),
+        "rsi1": round(float(result.get("rsi1", 0)), 2),
+        "rsi5": round(float(result.get("rsi5", 0)), 2),
+        "adx": round(float(result.get("adx", 0)), 2),
+        "relative_volume": round(float(result.get("relative_volume", 0)), 3),
+        "vwap_distance_pct": round(float(result.get("vwap_distance", 0) * 100), 3),
+        "move_3m_pct": round(float(result.get("move_3m", 0) * 100), 3),
+        "move_5m_pct": round(float(result.get("move_5m", 0) * 100), 3),
+        "relative_strength_pct": round(float(result.get("relative_strength", 0) * 100), 3),
+        "market_reason": result.get("market_reason", ""),
+        "status": "OPEN",
+        "exit_time_ksa": None,
+        "exit_price": None,
+        "pnl_pct": None,
+        "result": None,
+        "reason": None,
+    }
+
+    virtual_trades[day].append(trade)
+    save_virtual_trades()
+
+
+def update_virtual_trades_for_stock(stock, current_price, now_ksa):
+    """يفحص الصفقات الافتراضية المفتوحة: هدف أو وقف."""
+    day = get_ksa_date()
+    changed = False
+
+    for trade in virtual_trades.get(day, []):
+        if trade.get("stock") != stock or trade.get("status") != "OPEN":
+            continue
+
+        entry = float(trade["entry"])
+        target = float(trade["target"])
+        stop = float(trade["stop"])
+
+        if current_price >= target:
+            trade["status"] = "CLOSED"
+            trade["exit_time_ksa"] = now_ksa
+            trade["exit_price"] = round(float(target), 4)
+            trade["pnl_pct"] = round((target - entry) / entry * 100, 3)
+            trade["result"] = "WIN"
+            trade["reason"] = "وصل الهدف الافتراضي بعد التنبيه"
+            changed = True
+
+        elif current_price <= stop:
+            trade["status"] = "CLOSED"
+            trade["exit_time_ksa"] = now_ksa
+            trade["exit_price"] = round(float(stop), 4)
+            trade["pnl_pct"] = round((stop - entry) / entry * 100, 3)
+            trade["result"] = "LOSS"
+            trade["reason"] = "ضرب وقف المتابعة الافتراضي بعد التنبيه"
+            changed = True
+
+    if changed:
+        save_virtual_trades()
+
+
+def build_daily_report(day):
+    trades = virtual_trades.get(day, [])
+    if not trades:
+        return f"📊 تقرير اليوم {day}\nلا توجد تنبيهات مسجلة اليوم."
+
+    closed = [t for t in trades if t.get("status") == "CLOSED"]
+    open_trades = [t for t in trades if t.get("status") == "OPEN"]
+    wins = [t for t in closed if t.get("result") == "WIN"]
+    losses = [t for t in closed if t.get("result") == "LOSS"]
+
+    total_pnl = sum(float(t.get("pnl_pct") or 0) for t in closed)
+    win_rate = (len(wins) / len(closed) * 100) if closed else 0
+
+    best = max(closed, key=lambda x: float(x.get("pnl_pct") or 0), default=None)
+    worst = min(closed, key=lambda x: float(x.get("pnl_pct") or 0), default=None)
+
+    beast_wins = [t for t in wins if t.get("momentum_beast")]
+    beast_losses = [t for t in losses if t.get("momentum_beast")]
+
+    lines = []
+    lines.append(f"📊 تقرير نتائج البوت الافتراضية - {day}")
+    lines.append("البوت اعتبر نفسه دخل في كل تنبيه أرسله.")
+    lines.append("")
+    lines.append(f"📌 عدد التنبيهات: {len(trades)}")
+    lines.append(f"✅ رابحة: {len(wins)}")
+    lines.append(f"❌ خاسرة: {len(losses)}")
+    lines.append(f"⏳ مفتوحة/لم تحسم: {len(open_trades)}")
+    lines.append(f"🎯 نسبة النجاح للصفقات المحسومة: {win_rate:.1f}%")
+    lines.append(f"💰 صافي الحركة الافتراضية: {total_pnl:.2f}%")
+    lines.append("")
+
+    if best:
+        lines.append(f"🏆 أفضل تنبيه: {best['stock']} {best['pnl_pct']}% - {best['alert_type']} - RVOL {best['relative_volume']}x - Real {best['real_score']}/9")
+    if worst:
+        lines.append(f"⚠️ أسوأ تنبيه: {worst['stock']} {worst['pnl_pct']}% - {worst['alert_type']} - RVOL {worst['relative_volume']}x - Real {worst['real_score']}/9")
+
+    lines.append("")
+    lines.append(f"🐺 Momentum Beast: ربح {len(beast_wins)} / خسر {len(beast_losses)}")
+    lines.append("")
+    lines.append("🔍 أسباب الربح والخسارة:")
+
+    for t in closed[-10:]:
+        lines.append(
+            f"- {t['stock']} {t['result']} {t['pnl_pct']}% | "
+            f"{t['alert_type']} | Real {t['real_score']} | "
+            f"RVOL {t['relative_volume']}x | ADX {t['adx']} | "
+            f"VWAP {t['vwap_distance_pct']}% | {t['reason']}"
+        )
+
+    return "\n".join(lines)
+
+
+def maybe_send_daily_report():
+    """يرسل التقرير اليومي مرة واحدة بعد 23:00 بتوقيت السعودية."""
+    global daily_report_sent_for
+
+    saudi = pytz.timezone("Asia/Riyadh")
+    now = datetime.now(saudi)
+    day = now.strftime("%Y-%m-%d")
+
+    if (
+        now.hour == DAILY_REPORT_HOUR_KSA
+        and now.minute >= DAILY_REPORT_MINUTE_KSA
+        and daily_report_sent_for != day
+    ):
+        send(build_daily_report(day))
+        daily_report_sent_for = day
+
+
+load_virtual_trades()
 
 
 print("BOT FILE STARTED", flush=True)
@@ -559,6 +749,8 @@ while True:
                 gc.collect()
                 continue
 
+            update_virtual_trades_for_stock(stock, result["price"], now_ksa)
+
             score = result["score"]
             now_time = time.time()
             last_time = last_alert_time.get(stock, 0)
@@ -608,6 +800,7 @@ while True:
             )
 
             if normal_cooldown_ok or elite_upgrade or big_price_continuation:
+                alert_type = "GOLDEN" if result["golden_setup"] else "GOOD"
                 title = "🔥🚀 V34 GOLDEN STOCK ALERT 🚀🔥" if result["golden_setup"] else "✅🚀 V34 GOOD STOCK ALERT 🚀✅"
                 note = "فرصة ذهبية عالية الجودة" if result["golden_setup"] else "فرصة جيدة بجودة مقبولة"
 
@@ -686,6 +879,7 @@ while True:
 """
 
                 send(msg)
+                register_virtual_trade(stock, result, score, alert_type, now_ksa)
                 print(msg, flush=True)
 
                 last_alert_time[stock] = now_time
