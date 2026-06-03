@@ -106,7 +106,7 @@ R:R={r['levels']['rr']}x | MACD Cross: {r['macd_cross']}
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-6",
                 "max_tokens": 100,
                 "messages": [{"role": "user", "content": prompt}]
             },
@@ -114,10 +114,11 @@ R:R={r['levels']['rr']}x | MACD Cross: {r['macd_cross']}
         )
         if response.status_code == 200:
             return response.json()["content"][0]["text"].strip()
-        return "Claude error"
+        log.error(f"Claude API error: {response.status_code} - {response.text[:200]}")
+        return f"API error {response.status_code}"
     except Exception as e:
         log.error(f"Claude error: {e}")
-        return ""
+        return f"خطأ: {e}"
 
 
 # ─── صياد الانفجارات ────────────────────────────────────────
