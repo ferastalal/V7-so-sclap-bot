@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("ScalpBot")
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "8948332078:AAEYXuDitmQfB9iYB-kF8lkW-5QfimabOQI")
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "8948332078:AAHJdUSjtNXiDs6l9Pm9BLqcW6V3OvEK2hQ")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1016589957")
 
 WATCHLIST = ["TSLA", "NVDA", "AMD", "SMCI", "PLTR"]
@@ -32,8 +32,8 @@ WATCHLIST = ["TSLA", "NVDA", "AMD", "SMCI", "PLTR"]
 CHECK_SECONDS = 20
 ALERT_COOLDOWN = 600
 
-MIN_SCORE = 100
-MIN_REAL_SCORE = 5
+MIN_SCORE = 80
+MIN_REAL_SCORE = 4
 
 TARGET_NORMAL = 0.008
 TARGET_GOLDEN = 0.012
@@ -357,9 +357,9 @@ def analyze(stock: str):
         # Filters
         power = is_power_session()
         max_rsi1    = 85
-        max_move_1m = 0.025 if power else 0.018
-        max_move_5m = 0.040 if power else 0.030
-        max_vwap    = 0.025 if power else 0.018
+        max_move_1m = 0.030 if power else 0.022
+        max_move_5m = 0.050 if power else 0.038
+        max_vwap    = 0.030 if power else 0.022
         if rsi1 > max_rsi1:
             ds.log_filtered()
             log.info(f"{stock}: FILTERED RSI1={rsi1:.1f}")
@@ -383,7 +383,7 @@ def analyze(stock: str):
         if rsi5 < 30:
             ds.log_filtered()
             return None
-        if dollar_vol < 200000:
+        if dollar_vol < 100000:
             ds.log_filtered()
             log.info(f"{stock}: FILTERED dollar_vol low")
             return None
