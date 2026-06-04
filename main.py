@@ -450,8 +450,7 @@ def analyze(stock: str):
         if vwap_dist < -0.004:    ds.log_filtered(); return None
         if rsi5 < 30:             ds.log_filtered(); return None
         if dollar_vol < 100000:   ds.log_filtered(); return None
-        if rel_vol < 1.0:         ds.log_filtered(); 
-return None
+        if rel_vol < 1.0:         ds.log_filtered(); return None
 
 ‎        # ─── فلتر الفشل المحسّن #7 ──────────────────────────
         high_20      = float(high1.iloc[-21:-1].max())   # الشموع السابقة فقط
