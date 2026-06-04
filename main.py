@@ -339,7 +339,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
 
     aggressive = (score >= 5 and adx >= 28 and move_5m > 0.003
                   and rel_strength > 0.0015 and vwap_dist > 0)
-    golden = (score >= 7 or aggressive) and adx >= 20 and rel_volume >= 1.2  # Golden الحقيقي من 7/9
+    golden = (score >= 7 or aggressive) and adx >= 20 and rel_vol >= 1.2  # Golden الحقيقي من 7/9
     good   = score >= 5
 
     label = "🥇 GOLDEN" if golden else ("✅ GOOD" if good else "⚠️ WEAK")
@@ -450,9 +450,10 @@ def analyze(stock: str):
         if vwap_dist < -0.004:    ds.log_filtered(); return None
         if rsi5 < 30:             ds.log_filtered(); return None
         if dollar_vol < 100000:   ds.log_filtered(); return None
-        if adx < 22:              ds.log_filtered(); log.info(f"{stock}: FILTERED ADX={adx:.1f}"); return None
-            
-        # ─── فلتر الفشل المحسّن #7 ──────────────────────────
+       if rel_vol < 1.0: ds.log_filtered(); 
+return None
+
+‎        # ─── فلتر الفشل المحسّن #7 ──────────────────────────
         high_20      = float(high1.iloc[-21:-1].max())   # الشموع السابقة فقط
         near_break   = price >= high_20 * 0.997
         last_high    = float(high1.iloc[-1])
@@ -486,8 +487,7 @@ def analyze(stock: str):
         if ema9_5 > ema21_5:          score += 10; reasons.append("ترند 5د ✓")
         if ema9_15 > ema21_15:        score += 8;  reasons.append("ترند 15د ✓")
         if price > ema50_1:           score += 8;  reasons.append("فوق EMA50")
-        if 48 <= rsi1 <= 65:          score += 12; reasons.append(f"RSI {rsi1:.0f} ✓")
-        elif 70 < rsi1 <= 78:         score += 6;  reasons.append(f"RSI {rsi1:.0f} مرتفع")
+        if 48 <= rsi1 <= 65:          score += 12; reasons.append(f"RSI {rsi1:.0f} مرتفع")
         if macd_cross:                score += 18; reasons.append("MACD Cross 🔔")
         elif macd_now > macd_sig and macd_hist > 0: score += 10; reasons.append("MACD صاعد")
         if price > vwap_value and 0.0003 <= vwap_dist <= 0.008: score += 15; reasons.append("فوق VWAP ✓")
