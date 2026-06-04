@@ -339,7 +339,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
 
     aggressive = (score >= 5 and adx >= 28 and move_5m > 0.003
                   and rel_strength > 0.0015 and vwap_dist > 0)
-    golden = (score >= 7 or aggressive) and adx >= 20 and rel_vol >= 1.2  # Golden الحقيقي من 7/9
+    golden = (score >= 7 or aggressive) and adx >= 20 and rel_volume >= 1.2  # Golden الحقيقي من 7/9
     good   = score >= 5
 
     label = "🥇 GOLDEN" if golden else ("✅ GOOD" if good else "⚠️ WEAK")
@@ -450,7 +450,8 @@ def analyze(stock: str):
         if vwap_dist < -0.004:    ds.log_filtered(); return None
         if rsi5 < 30:             ds.log_filtered(); return None
         if dollar_vol < 100000:   ds.log_filtered(); return None
-
+        if adx < 22:              ds.log_filtered(); log.info(f"{stock}: FILTERED ADX={adx:.1f}"); return None
+            
         # ─── فلتر الفشل المحسّن #7 ──────────────────────────
         high_20      = float(high1.iloc[-21:-1].max())   # الشموع السابقة فقط
         near_break   = price >= high_20 * 0.997
