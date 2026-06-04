@@ -438,7 +438,7 @@ def analyze(stock: str):
         power = is_power_session()
 
         # ─── فلاتر محسّنة ───────────────────────────────────
-        max_rsi1    = 82                               # #7 RSI أقوى
+        max_rsi1    = 68                               # #7 RSI أقوى
         max_move_1m = 0.030 if power else 0.022
         max_move_5m = 0.050 if power else 0.038
         max_vwap    = 0.016 if power else 0.012        # #6 منع الفرص المتأخرة
@@ -485,7 +485,7 @@ def analyze(stock: str):
         if ema9_5 > ema21_5:          score += 10; reasons.append("ترند 5د ✓")
         if ema9_15 > ema21_15:        score += 8;  reasons.append("ترند 15د ✓")
         if price > ema50_1:           score += 8;  reasons.append("فوق EMA50")
-        if 48 <= rsi1 <= 70:          score += 12; reasons.append(f"RSI {rsi1:.0f} ✓")
+        if 48 <= rsi1 <= 65:          score += 12; reasons.append(f"RSI {rsi1:.0f} ✓")
         elif 70 < rsi1 <= 78:         score += 6;  reasons.append(f"RSI {rsi1:.0f} مرتفع")
         if macd_cross:                score += 18; reasons.append("MACD Cross 🔔")
         elif macd_now > macd_sig and macd_hist > 0: score += 10; reasons.append("MACD صاعد")
