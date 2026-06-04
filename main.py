@@ -451,8 +451,8 @@ def analyze(stock: str):
         if rsi5 < 30:             ds.log_filtered(); return None
         if dollar_vol < 100000:   ds.log_filtered(); return None
         if rel_vol < 1.0:         ds.log_filtered(); return None
-
-‎        # filter 7
+            
+        # filter 7
         high_20      = float(high1.iloc[-21:-1].max())      
         near_break   = price >= high_20 * 0.997
         last_high    = float(high1.iloc[-1])
