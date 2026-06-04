@@ -452,8 +452,8 @@ def analyze(stock: str):
         if dollar_vol < 100000:   ds.log_filtered(); return None
         if rel_vol < 1.0:         ds.log_filtered(); return None
 
-‎        # ─── فلتر الفشل المحسّن #7 ──────────────────────────
-        high_20      = float(high1.iloc[-21:-1].max())    # الشموع السابقة فقط
+‎        # filter 7
+        high_20      = float(high1.iloc[-21:-1].max())      
         near_break   = price >= high_20 * 0.997
         last_high    = float(high1.iloc[-1])
         last_close   = float(close1.iloc[-1])
