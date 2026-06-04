@@ -190,10 +190,12 @@ def check_followup(stock: str, cur: float, track: dict, close1, volume1):
         # وقف أو هدف
         if cur <= stop:
             loss = (cur - entry) / entry * 100
+            ds.log_result(stock, "loss", cur)
             del followup_tracking[stock]
             return f"🛑 <b>وقف خسارة - {stock}</b>\n💵 {cur:.2f} | {loss:.2f}%"
         if cur >= target:
             profit = (cur - entry) / entry * 100
+            ds.log_result(stock, "win", cur)
             del followup_tracking[stock]
             return f"🎯 <b>هدف محقق - {stock}</b>\n💵 {cur:.2f} | +{profit:.2f}%"
 
@@ -550,6 +552,14 @@ RSI:{r['rsi1']:.0f} ADX:{r['adx']:.0f} Vol:{r['rel_vol']:.1f}x VWAP:{r['vwap_dis
 
 
 # ─── MAIN ───────────────────────────────────────────────────
+
+def _last_price(stock):
+    try:
+        df = download(stock, "1d", "1m")
+        return float(df["Close"].squeeze().iloc[-1]) if not df.empty else None
+    except Exception:
+        return None
+
 log.info("BOT STARTED v3")
 send("🚀 <b>SCALP BOT PRO v3</b>\n🤖 Claude AI | 💥 صياد الانفجارات | 🔄 متابعة ذكية")
 
@@ -563,6 +573,7 @@ while True:
 
         try:
             if ds.should_send_summary():
+                ds.close_all_open(lambda s: _last_price(s))
                 ds.send_summary(send)
         except Exception as e:
             log.error(f"Summary error: {e}")
@@ -646,7 +657,8 @@ while True:
                              rsi=result["rsi1"],
                              vol=result["rel_vol"],
                              vwap_dist=result["vwap_dist"])
-            except: pass
+            except Exception as e:
+                              log.error(f"log_alert: {e}")
 
             last_alert_time[stock] = now_time
             last_alert_snapshot[stock] = {
