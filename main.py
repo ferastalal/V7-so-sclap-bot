@@ -13,7 +13,20 @@ import pandas as pd
 from datetime import datetime, date
 import pytz
 import logging
+# ─── Alpaca ───
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
+_alpaca_client = None
+def _get_alpaca():
+    global _alpaca_client
+    if _alpaca_client is None:
+        k = os.environ.get("ALPACA_KEY", "")
+        s = os.environ.get("ALPACA_SECRET", "")
+        if k and s:
+            _alpaca_client = StockHistoricalDataClient(k, s)
+    return _alpaca_client
 try:
     import daily_summary as ds
     DS_AVAILABLE = True
