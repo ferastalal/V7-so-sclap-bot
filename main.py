@@ -17,6 +17,7 @@ import logging
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from alpaca.data.enums import DataFeed
 
 _alpaca_client = None
 def _get_alpaca():
@@ -311,6 +312,7 @@ def download(stock: str, period: str, interval: str) -> pd.DataFrame:
             timeframe=tf,
             start=start_dt,
             end=end_dt,
+            feed=DataFeed.IEX,
         )
         bars = client.get_stock_bars(req)
         df = bars.df
