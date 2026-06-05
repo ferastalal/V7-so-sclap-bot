@@ -277,6 +277,7 @@ def clean_columns(df, stock):
     return df
 
 def download(stock: str, period: str, interval: str) -> pd.DataFrame:
+
 try:
         client = _get_alpaca()
         if client is None:
