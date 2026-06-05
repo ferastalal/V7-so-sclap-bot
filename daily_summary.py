@@ -1,199 +1,299 @@
 """
 =============================================================
-DAILY SUMMARY SYSTEM - v2
+DAILY SUMMARY SYSTEM v2 - Professional
+يحلل بعد كل جلسة: عدد الصفقات + أسباب الدخول + أسباب الربح/الخسارة
 =============================================================
 """
 from datetime import date, datetime
-from collections import Counter
+from collections import Counter, defaultdict
 import pytz
-import requests
-import os
 
-CLAUDE_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
-today_alerts: list = []
+# ─── ذاكرة اليوم ─────────────────────────────────────────────
+# كل صفقة = dict فيها بيانات الدخول + النتيجة (تُملأ لاحقاً)
+today_trades: list = []
 today_filtered: int = 0
 summary_sent: bool = False
 summary_date: date = None
 
+# فهرس سريع: stock -> آخر صفقة مفتوحة (للربط مع النتيجة)
+_open_index: dict = {}
 
-def log_alert(stock: str, score: int, real_score: int,
-              golden: bool, quality_label: str,
-              price: float, session: str,
-              entry: float = 0, target: float = 0, stop: float = 0,
-              reasons: list = None, claude_verdict: str = "",
-              rr: float = 0, adx: float = 0, rsi: float = 0,
-              vol: float = 0, vwap_dist: float = 0):
-    """Save alert to today's log."""
-    ksa_time = datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%H:%M:%S")
-    today_alerts.append({
+
+def _ksa_now() -> str:
+    return datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%H:%M:%S")
+
+
+# ─── تسجيل الدخول ────────────────────────────────────────────
+def log_alert(stock, score, real_score, golden, quality_label,
+              price, session, entry=None, target=None, stop=None,
+              reasons=None, rr=None, adx=None, rsi=None, vol=None,
+              vwap_dist=None, **kwargs):
+    """يسجّل صفقة جديدة لحظة التنبيه مع كل أسباب الدخول.
+    أي باراميتر إضافي يُتجاهل بأمان عبر **kwargs."""
+    trade = {
         "stock": stock,
         "score": score,
         "real_score": real_score,
-        "golden": golden,
+        "golden": bool(golden),
         "quality_label": quality_label,
-        "price": price,
-        "session": session,
-        "time": ksa_time,
-        "entry": entry,
-        "target": target,
-        "stop": stop,
-        "reasons": reasons or [],
-        "claude_verdict": claude_verdict,
-        "rr": rr,
-        "adx": adx,
-        "rsi": rsi,
-        "vol": vol,
-        "vwap_dist": vwap_dist,
-        "final_price": 0,
-        "result": "unknown",
-    })
+        "price": float(price) if price is not None else 0.0,
+        "session": session or "عادي",
+        "entry": float(entry) if entry is not None else float(price or 0),
+        "target": float(target) if target is not None else 0.0,
+        "stop": float(stop) if stop is not None else 0.0,
+        "reasons": list(reasons) if reasons else [],
+        "rr": float(rr) if rr is not None else 0.0,
+        "adx": float(adx) if adx is not None else 0.0,
+        "rsi": float(rsi) if rsi is not None else 0.0,
+        "vol": float(vol) if vol is not None else 0.0,
+        "vwap_dist": float(vwap_dist) if vwap_dist is not None else 0.0,
+        "time": _ksa_now(),
+        # النتيجة - تُملأ عند الإغلاق
+        "outcome": None,        # "win" | "loss" | "open_close"
+        "exit_price": None,
+        "pnl_pct": None,
+        "exit_time": None,
+    }
+    today_trades.append(trade)
+    _open_index[stock] = trade   # آخر صفقة مفتوحة لهذا السهم
+
+
+def log_result(stock, outcome, exit_price, exit_time=None):
+    """يربط نتيجة الصفقة (هدف/وقف/إغلاق) بآخر صفقة مفتوحة لنفس السهم.
+    outcome: 'win' | 'loss' | 'open_close'"""
+    trade = _open_index.get(stock)
+    if not trade or trade.get("outcome") is not None:
+        return  # ما فيه صفقة مفتوحة أو أنها مقفلة أصلاً
+    entry = trade["entry"] if trade["entry"] > 0 else trade["price"]
+    pnl = ((float(exit_price) - entry) / entry * 100) if entry > 0 else 0.0
+    trade["outcome"] = outcome
+    trade["exit_price"] = float(exit_price)
+    trade["pnl_pct"] = round(pnl, 2)
+    trade["exit_time"] = exit_time or _ksa_now()
+    _open_index.pop(stock, None)
+    # يرجّع تحليل فوري للصفقة (يرسله البوت في تلقرام)
+    return build_trade_analysis(trade)
+
+
+def build_trade_analysis(t) -> str:
+    """تحليل فوري لصفقة مقفلة: سبب التنبيه + بيانات الدخول + قراءة السبب."""
+    won = t["outcome"] == "win"
+    icon = "🎯 ربح" if won else ("🛑 خسارة" if t["outcome"] == "loss" else "🔔 إغلاق")
+    pnl = t.get("pnl_pct") or 0.0
+    rsi = t.get("rsi", 0); adx = t.get("adx", 0); vol = t.get("vol", 0)
+    rr = t.get("rr", 0); vwap = t.get("vwap_dist", 0)
+
+    triggers = list(t.get("reasons", []))
+    trigger_line = "، ".join(triggers[:4]) if triggers else "—"
+
+    insights = []
+    if won:
+        if vol >= 2.0: insights.append("✅ حجم قوي دعم الحركة")
+        if adx >= 28: insights.append("✅ ترند قوي (ADX عالي)")
+        if 48 <= rsi <= 62: insights.append("✅ RSI صحي وقت الدخول")
+        if rr >= 2.0: insights.append("✅ R:R ممتاز")
+        if not insights: insights.append("✅ الصفقة سارت لصالحك")
+    else:
+        if rsi >= 65: insights.append("⚠️ RSI عالي = دخول متأخر محتمل")
+        if 0 < vol < 1.3: insights.append("⚠️ حجم ضعيف = زخم غير مؤكد")
+        if adx < 20: insights.append("⚠️ ADX ضعيف = لا يوجد ترند واضح")
+        if rr < 1.5: insights.append("⚠️ R:R ضعيف = مخاطرة غير مبررة")
+        if vwap > 0.010: insights.append("⚠️ بعيد عن VWAP = دخول متأخر")
+        if not insights: insights.append("⚠️ تحرك السعر عكسك رغم الإشارات الجيدة")
+    insight_text = "\n".join(f"   {x}" for x in insights)
+
+    return f"""📊 <b>تحليل الصفقة - {t['stock']}</b> | {icon} {pnl:+.2f}%
+━━━━━━━━━━━━━━━
+🔔 <b>سبب التنبيه:</b> {trigger_line}
+📥 <b>بيانات الدخول:</b>
+   دخول {t['entry']:.2f} | هدف {t['target']:.2f} | وقف {t['stop']:.2f}
+   RSI:{rsi:.0f} | ADX:{adx:.0f} | Vol:{vol:.1f}x | R:R:{rr:.1f}x | VWAP:{vwap*100:+.1f}%
+🧠 <b>القراءة:</b>
+{insight_text}""".strip()
 
 
 def log_filtered():
-    """Count filtered opportunities."""
     global today_filtered
     today_filtered += 1
 
 
-def fetch_final_prices():
-    """يجيب السعر النهائي لكل سهم"""
-    try:
-        import yfinance as yf
-        stocks = list({a["stock"] for a in today_alerts})
-        for stock in stocks:
-            try:
-                df = yf.download(stock, period="1d", interval="1m",
-                                 progress=False, auto_adjust=True, threads=False)
-                if df is not None and not df.empty:
-                    final = float(df["Close"].squeeze().iloc[-1])
-                    for a in today_alerts:
-                        if a["stock"] == stock and a["final_price"] == 0:
-                            a["final_price"] = final
-                            entry = a.get("entry", 0)
-                            target = a.get("target", 0)
-                            stop = a.get("stop", 0)
-                            if entry > 0 and final > 0:
-                                pnl = (final - entry) / entry * 100
-                                if final >= target:
-                                    a["result"] = f"✅ هدف محقق +{pnl:.2f}%"
-                                elif final <= stop:
-                                    a["result"] = f"❌ وقف خسارة {pnl:.2f}%"
-                                elif final > entry:
-                                    a["result"] = f"📈 ربح جزئي +{pnl:.2f}%"
-                                else:
-                                    a["result"] = f"📉 خسارة {pnl:.2f}%"
-            except:
-                pass
-    except:
-        pass
+# ─── محرك التحليل ────────────────────────────────────────────
+def _factor_breakdown(wins, losses):
+    """يقارن متوسط كل عامل بين الرابحة والخاسرة + يطلع رؤى."""
+    lines = []
+
+    def avg(trades, key):
+        vals = [t[key] for t in trades if t.get(key) is not None]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    if not wins and not losses:
+        return "  لا توجد صفقات مكتملة للتحليل"
+
+    factors = [
+        ("RSI", "rsi", "{:.0f}"),
+        ("ADX", "adx", "{:.0f}"),
+        ("الحجم النسبي", "vol", "{:.2f}x"),
+        ("بُعد VWAP", "vwap_dist", "{:+.2%}"),
+        ("Score", "score", "{:.0f}"),
+        ("R:R", "rr", "{:.1f}x"),
+    ]
+    for label, key, fmt in factors:
+        wv = avg(wins, key)
+        lv = avg(losses, key)
+        wstr = fmt.format(wv) if wins else "—"
+        lstr = fmt.format(lv) if losses else "—"
+        lines.append(f"  • {label}: رابحة {wstr} | خاسرة {lstr}")
+
+    return "\n".join(lines)
 
 
-def claude_analyze_summary(alerts_text: str) -> str:
-    """يطلب من Claude تحليل ملخص اليوم"""
-    try:
-        if not CLAUDE_KEY:
-            return ""
-        prompt = f"""أنت محلل تداول خبير. حلل نتائج هذا اليوم في 3-4 أسطر:
+def _pattern_insights(wins, losses):
+    """يطلع أهم أنماط الربح والخسارة من أسباب الدخول والجلسة."""
+    insights = []
 
-{alerts_text}
+    # 1) الجلسة
+    def sess_rate(trades_subset, all_trades, name):
+        n = sum(1 for t in all_trades if name in (t["session"] or ""))
+        w = sum(1 for t in trades_subset if name in (t["session"] or ""))
+        return w, n
 
-ركز على:
-1. ما هي الأنماط الناجحة؟
-2. ما هي أسباب الإخفاقات؟
-3. توصية واحدة لتحسين الأداء غداً."""
+    # 2) Golden vs عادي
+    golden_done = [t for t in (wins + losses) if t["golden"]]
+    golden_wins = [t for t in wins if t["golden"]]
+    if golden_done:
+        gr = len(golden_wins) / len(golden_done) * 100
+        insights.append(f"🥇 الصفقات الذهبية: {len(golden_wins)}/{len(golden_done)} رابحة ({gr:.0f}%)")
 
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": CLAUDE_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 200,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=20
-        )
-        if response.status_code == 200:
-            return response.json()["content"][0]["text"].strip()
-        return ""
-    except:
-        return ""
+    # 3) أكثر أسباب الدخول في الصفقات الرابحة
+    win_reasons = Counter()
+    for t in wins:
+        for r in t["reasons"]:
+            win_reasons[r] += 1
+    if win_reasons:
+        top_win = win_reasons.most_common(3)
+        insights.append("✅ أكثر أسباب ظهرت في الرابحة: " +
+                        ", ".join(f"{r} ({c})" for r, c in top_win))
+
+    # 4) أكثر أسباب الدخول في الخاسرة
+    loss_reasons = Counter()
+    for t in losses:
+        for r in t["reasons"]:
+            loss_reasons[r] += 1
+    if loss_reasons:
+        top_loss = loss_reasons.most_common(3)
+        insights.append("❌ أكثر أسباب ظهرت في الخاسرة: " +
+                        ", ".join(f"{r} ({c})" for r, c in top_loss))
+
+    # 5) RSI عالي مرتبط بالخسارة؟
+    if losses:
+        high_rsi_losses = sum(1 for t in losses if t["rsi"] >= 65)
+        if high_rsi_losses >= max(2, len(losses) // 2):
+            insights.append(f"⚠️ {high_rsi_losses} من الخاسرة دخلت بـ RSI ≥ 65 (دخول متأخر محتمل)")
+
+    # 6) حجم ضعيف مرتبط بالخسارة؟
+    if losses:
+        low_vol_losses = sum(1 for t in losses if 0 < t["vol"] < 1.3)
+        if low_vol_losses >= max(2, len(losses) // 2):
+            insights.append(f"⚠️ {low_vol_losses} من الخاسرة دخلت بحجم نسبي ضعيف (<1.3x)")
+
+    return insights
 
 
 def build_summary() -> str:
-    fetch_final_prices()
+    total = len(today_trades)
 
-    total = len(today_alerts)
-    golden_n = sum(1 for a in today_alerts if a["golden"])
-    good_n = total - golden_n
-    stocks = list({a["stock"] for a in today_alerts})
-    stock_count = Counter(a["stock"] for a in today_alerts)
+    completed = [t for t in today_trades if t["outcome"] in ("win", "loss", "open_close")]
+    wins = [t for t in today_trades if t["outcome"] == "win"]
+    losses = [t for t in today_trades if t["outcome"] == "loss"]
+    open_close = [t for t in today_trades if t["outcome"] == "open_close"]
+    still_open = [t for t in today_trades if t["outcome"] is None]
+
+    # نضم صفقات الإغلاق للرابحة/الخاسرة حسب نتيجتها الفعلية
+    for t in open_close:
+        if (t["pnl_pct"] or 0) >= 0:
+            wins.append(t)
+        else:
+            losses.append(t)
+
+    n_win = len(wins)
+    n_loss = len(losses)
+    decided = n_win + n_loss
+    win_rate = (n_win / decided * 100) if decided else 0.0
+
+    total_pnl = sum(t["pnl_pct"] for t in (wins + losses) if t["pnl_pct"] is not None)
+    avg_win = (sum(t["pnl_pct"] for t in wins if t["pnl_pct"] is not None) / n_win) if n_win else 0.0
+    avg_loss = (sum(t["pnl_pct"] for t in losses if t["pnl_pct"] is not None) / n_loss) if n_loss else 0.0
+
+    golden_n = sum(1 for t in today_trades if t["golden"])
+    stocks = list({t["stock"] for t in today_trades})
+    stock_count = Counter(t["stock"] for t in today_trades)
     most_active = stock_count.most_common(1)[0] if stock_count else None
 
-    # إحصاء النتائج
-    success = sum(1 for a in today_alerts if "✅" in a.get("result", ""))
-    failed  = sum(1 for a in today_alerts if "❌" in a.get("result", ""))
-    partial = sum(1 for a in today_alerts if "📈" in a.get("result", ""))
+    # قائمة الصفقات
+    trade_lines = ""
+    for i, t in enumerate(today_trades, 1):
+        if t["outcome"] == "win":
+            icon, res = "🎯", f"+{t['pnl_pct']:.2f}%"
+        elif t["outcome"] == "loss":
+            icon, res = "🛑", f"{t['pnl_pct']:.2f}%"
+        elif t["outcome"] == "open_close":
+            sign = "+" if (t["pnl_pct"] or 0) >= 0 else ""
+            icon, res = "🔔", f"{sign}{t['pnl_pct']:.2f}% (إغلاق)"
+        else:
+            icon, res = "⏳", "مفتوحة"
+        gicon = "🥇" if t["golden"] else "✅"
+        reasons_short = "، ".join(t["reasons"][:3]) if t["reasons"] else "—"
+        trade_lines += (
+            f"\n  {i}. {icon} {gicon} <b>{t['stock']}</b> {res}"
+            f"\n     دخول {t['entry']:.2f} | {t['time']} | {t['session']}"
+            f"\n     أسباب: {reasons_short}"
+        )
 
-    # بناء تفاصيل كل صفقة
-    alert_lines = ""
-    alerts_for_claude = ""
-    for i, a in enumerate(today_alerts, 1):
-        icon = "🥇" if a["golden"] else "✅"
-        reasons_text = " | ".join(a.get("reasons", [])[:3]) if a.get("reasons") else "—"
-        claude_text = a.get("claude_verdict", "")
-        result_text = a.get("result", "لم يتابع")
-        final = a.get("final_price", 0)
+    factor_text = _factor_breakdown(
+        [t for t in wins], [t for t in losses]
+    )
+    insights = _pattern_insights(
+        [t for t in wins], [t for t in losses]
+    )
+    insights_text = "\n".join(f"  {x}" for x in insights) if insights else "  لا توجد أنماط كافية"
 
-        alert_lines += f"""
-━━━━━━━━━━━━━━━
-{i}. {icon} <b>{a['stock']}</b> | {a['time']} | {a['session']}
-💵 دخول: {a.get('entry', a['price']):.2f} | 🎯 {a.get('target', 0):.2f} | 🛑 {a.get('stop', 0):.2f}
-📊 {a['quality_label']} | Real:{a['real_score']}/9 | R:R:{a.get('rr', 0):.1f}x
-📈 ADX:{a.get('adx', 0):.0f} RSI:{a.get('rsi', 0):.0f} Vol:{a.get('vol', 0):.1f}x
-🔍 أسباب: {reasons_text}
-🤖 Claude: {claude_text if claude_text else '—'}
-📌 النتيجة: {result_text}{f' | سعر الإغلاق: {final:.2f}' if final > 0 else ''}"""
+    most_active_line = (f"الأنشط: {most_active[0]} ({most_active[1]} مرات)"
+                        if most_active else "")
 
-        alerts_for_claude += f"{a['stock']} | {a['quality_label']} | نتيجة: {result_text}\n"
-
-    # تحليل Claude للملخص
-    claude_summary = claude_analyze_summary(alerts_for_claude) if today_alerts else ""
-    claude_section = f"\n━━━━━━━━━━━━━━━\n🤖 <b>تحليل Claude لليوم:</b>\n{claude_summary}" if claude_summary else ""
-
-    stocks_line = ', '.join(stocks) if stocks else 'لا يوجد'
-    most_active_line = f"الأكثر نشاطاً: {most_active[0]} ({most_active[1]} مرة)" if most_active else ""
-
-    summary = f"""<b>ملخص اليوم - {date.today().strftime('%Y/%m/%d')}</b>
+    summary = f"""<b>📊 ملخص الجلسة - {date.today().strftime('%Y/%m/%d')}</b>
 ━━━━━━━━━━━━━━━━━
-<b>إجمالي التنبيهات: {total}</b>
-🥇 Golden: {golden_n} | ✅ Good: {good_n}
-✅ نجح: {success} | ❌ وقف: {failed} | 📈 جزئي: {partial}
-🚫 مفلتر: {today_filtered}
+<b>عدد الصفقات: {total}</b>
+🎯 رابحة: {n_win}  |  🛑 خاسرة: {n_loss}
+⏳ بقيت مفتوحة: {len(still_open)}
+📈 نسبة النجاح: <b>{win_rate:.0f}%</b>
+💰 محصلة الأداء: <b>{total_pnl:+.2f}%</b>
+متوسط الرابحة: +{avg_win:.2f}% | متوسط الخاسرة: {avg_loss:.2f}%
+🥇 ذهبية: {golden_n}  |  🔍 مفلترة: {today_filtered}
 ━━━━━━━━━━━━━━━━━
-الأسهم: {stocks_line}
+<b>🔬 تحليل العوامل (رابحة vs خاسرة):</b>
+{factor_text}
+━━━━━━━━━━━━━━━━━
+<b>🧠 أنماط ورؤى:</b>
+{insights_text}
+━━━━━━━━━━━━━━━━━
+<b>الأسهم النشطة:</b> {', '.join(stocks) if stocks else 'لا يوجد'}
 {most_active_line}
-أعلى سكور: {max((a['score'] for a in today_alerts), default=0)}
 ━━━━━━━━━━━━━━━━━
-<b>تفاصيل الصفقات:</b>
-{alert_lines if alert_lines else 'لا تنبيهات اليوم'}{claude_section}
+<b>📋 الصفقات:</b>{trade_lines if trade_lines else ' لا توجد صفقات اليوم'}
 ━━━━━━━━━━━━━━━━━
-انتهت الجلسة. أراك غداً!""".strip()
+انتهت الجلسة. نراك غداً! 👋""".strip()
 
     return summary
 
 
 def send_summary(send_func) -> bool:
-    global summary_sent, summary_date, today_alerts, today_filtered
+    global summary_sent, summary_date, today_trades, today_filtered, _open_index
     try:
         msg = build_summary()
         send_func(msg)
-        today_alerts = []
+        today_trades = []
         today_filtered = 0
+        _open_index = {}
         summary_sent = True
         summary_date = date.today()
         return True
@@ -203,15 +303,26 @@ def send_summary(send_func) -> bool:
 
 
 def should_send_summary() -> bool:
+    """بعد 4 عصراً بتوقيت نيويورك، مرة واحدة في اليوم."""
     global summary_sent, summary_date
     today = date.today()
     if summary_date != today:
         summary_sent = False
     if summary_sent:
         return False
-    ny = pytz.timezone("America/New_York")
-    now = datetime.now(ny)
+    now = datetime.now(pytz.timezone("America/New_York"))
     if now.weekday() >= 5:
         return False
-    t = now.strftime("%H:%M")
-    return "16:00" <= t <= "16:10"
+    return now.strftime("%H:%M") >= "16:00"
+
+
+def close_all_open(get_price_func):
+    """يُستدعى عند نهاية الجلسة: يقفل الصفقات المفتوحة على آخر سعر.
+    get_price_func(stock) لازم يرجّع آخر سعر أو None."""
+    for stock, trade in list(_open_index.items()):
+        try:
+            px = get_price_func(stock)
+            if px:
+                log_result(stock, "open_close", px)
+        except Exception as e:
+            print(f"close_all_open {stock}: {e}", flush=True)
