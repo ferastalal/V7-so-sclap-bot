@@ -190,16 +190,16 @@ def check_followup(stock: str, cur: float, track: dict, close1, volume1):
         # وقف أو هدف
         if cur <= stop:
             loss = (cur - entry) / entry * 100
-            ds.log_result(stock, "loss", cur)
+            analysis = ds.log_result(stock, "loss", cur)
             del followup_tracking[stock]
+            if analysis: send(analysis)
             return f"🛑 <b>وقف خسارة - {stock}</b>\n💵 {cur:.2f} | {loss:.2f}%"
         if cur >= target:
             profit = (cur - entry) / entry * 100
-            ds.log_result(stock, "win", cur)
+            analysis = ds.log_result(stock, "win", cur)
             del followup_tracking[stock]
+            if analysis: send(analysis)
             return f"🎯 <b>هدف محقق - {stock}</b>\n💵 {cur:.2f} | +{profit:.2f}%"
-
-        # مستويات المتابعة الذكية
         milestones = track.get("milestones_sent", set())
         msg = None
 
