@@ -627,7 +627,6 @@ send("🚀 <b>SCALP BOT PRO v3</b>\n🤖 Claude AI | 💥 صياد الانفج�
 while True:
     try:
         now_ksa = get_ksa_time()
-        log.info(f"LOOP TICK | {now_ksa}")
 
         if time.time() - last_heartbeat >= 3600:
             send(f"💓 BOT ALIVE | {now_ksa} | {session_label()}")
