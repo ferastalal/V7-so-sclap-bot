@@ -304,7 +304,7 @@ def download(stock: str, period: str, interval: str) -> pd.DataFrame:
             days = int(p[:-1]) * 366
 
         ny = pytz.timezone("America/New_York")
-        end_dt = datetime.now(ny)
+        end_dt = datetime.now(ny) - pd.Timedelta(minutes=16)
         start_dt = end_dt - pd.Timedelta(days=days + 4)
 
         req = StockBarsRequest(
