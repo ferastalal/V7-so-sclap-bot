@@ -277,17 +277,63 @@ def clean_columns(df, stock):
     return df
 
 def download(stock: str, period: str, interval: str) -> pd.DataFrame:
-    try:
-        df = yf.download(stock, period=period, interval=interval,
-                         progress=False, auto_adjust=True, threads=False)
-        df = clean_columns(df, stock)
-        if df is not None and not df.empty:
-            df = df.tail(MAX_HISTORY_BARS).copy()
-        return df if df is not None else pd.DataFrame()
+try:
+        client = _get_alpaca()
+        if client is None:
+            log.error(f"{stock}: no alpaca client")
+            return pd.DataFrame()
+
+        unit_map = {
+            "1m": TimeFrame(1, TimeFrameUnit.Minute),
+            "2m": TimeFrame(2, TimeFrameUnit.Minute),
+            "5m": TimeFrame(5, TimeFrameUnit.Minute),
+            "15m": TimeFrame(15, TimeFrameUnit.Minute),
+            "1h": TimeFrame(1, TimeFrameUnit.Hour),
+            "1d": TimeFrame(1, TimeFrameUnit.Day),
+        }
+        tf = unit_map.get(interval, TimeFrame(1, TimeFrameUnit.Minute))
+
+        days = 5
+        p = period.strip().lower()
+        if p.endswith("d"):
+            days = int(p[:-1])
+        elif p.endswith("mo"):
+            days = int(p[:-2]) * 31
+        elif p.endswith("y"):
+            days = int(p[:-1]) * 366
+
+        ny = pytz.timezone("America/New_York")
+        end_dt = datetime.now(ny)
+        start_dt = end_dt - pd.Timedelta(days=days + 4)
+
+        req = StockBarsRequest(
+            symbol_or_symbols=stock,
+            timeframe=tf,
+            start=start_dt,
+            end=end_dt,
+        )
+        bars = client.get_stock_bars(req)
+        df = bars.df
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        if isinstance(df.index, pd.MultiIndex):
+            df = df.xs(stock, level=0)
+
+        df = df.rename(columns={
+            "open": "Open", "high": "High", "low": "Low",
+            "close": "Close", "volume": "Volume",
+        })
+
+        df.index = pd.to_datetime(df.index).tz_convert(ny).tz_localize(None)
+        df = df[["Open", "High", "Low", "Close", "Volume"]]
+
+        df = df.tail(MAX_HISTORY_BARS).copy()
+        return df
     except Exception as e:
         log.error(f"Download error {stock}: {e}")
-        return pd.DataFrame()
-
+        return pd.DataFrame()    
 def calc_vwap(df):
     try:
         ny = pytz.timezone("America/New_York")
