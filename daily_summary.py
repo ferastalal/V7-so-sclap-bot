@@ -7,6 +7,8 @@ DAILY SUMMARY SYSTEM v2 - Professional
 from datetime import date, datetime
 from collections import Counter, defaultdict
 import pytz
+import os
+import json
 
 # ─── ذاكرة اليوم ─────────────────────────────────────────────
 # كل صفقة = dict فيها بيانات الدخول + النتيجة (تُملأ لاحقاً)
@@ -17,6 +19,51 @@ summary_date: date = None
 
 # فهرس سريع: stock -> آخر صفقة مفتوحة (للربط مع النتيجة)
 _open_index: dict = {}
+
+# ─── التخزين الدائم ──────────────────────────────────────────
+# يحفظ على قرص Render الدائم (/var/data) حتى لا تُمسح الصفقات عند إعادة التشغيل.
+# لو القرص غير موجود (تشغيل محلي) يستخدم المجلد الحالي.
+_DATA_DIR = "/var/data" if os.path.isdir("/var/data") else "."
+_STORE = os.path.join(_DATA_DIR, "trades_store.json")
+
+
+def _save_state():
+    """يحفظ كل حالة اليوم في ملف على القرص الدائم."""
+    try:
+        data = {
+            "summary_date": summary_date.isoformat() if summary_date else None,
+            "summary_sent": summary_sent,
+            "today_filtered": today_filtered,
+            "today_trades": today_trades,
+        }
+        tmp = _STORE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _STORE)   # كتابة ذرية (آمنة)
+    except Exception:
+        pass   # الحفظ لا يجب أن يكسر البوت أبداً
+
+
+def _load_state():
+    """يقرأ حالة اليوم من القرص عند بدء البوت."""
+    global today_trades, today_filtered, summary_sent, summary_date, _open_index
+    try:
+        if not os.path.isfile(_STORE):
+            return
+        with open(_STORE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        sd = data.get("summary_date")
+        summary_date = date.fromisoformat(sd) if sd else None
+        summary_sent = bool(data.get("summary_sent", False))
+        today_filtered = int(data.get("today_filtered", 0))
+        today_trades = data.get("today_trades", []) or []
+        # إعادة بناء فهرس الصفقات المفتوحة
+        _open_index = {}
+        for t in today_trades:
+            if t.get("outcome") is None:
+                _open_index[t["stock"]] = t
+    except Exception:
+        pass   # أي خطأ في القراءة = نبدأ فاضي بأمان
 
 
 def _ksa_now() -> str:
@@ -56,6 +103,7 @@ def log_alert(stock, score, real_score, golden, quality_label,
     }
     today_trades.append(trade)
     _open_index[stock] = trade   # آخر صفقة مفتوحة لهذا السهم
+    _save_state()
 
 
 def log_result(stock, outcome, exit_price, exit_time=None):
@@ -71,6 +119,7 @@ def log_result(stock, outcome, exit_price, exit_time=None):
     trade["pnl_pct"] = round(pnl, 2)
     trade["exit_time"] = exit_time or _ksa_now()
     _open_index.pop(stock, None)
+    _save_state()
     # يرجّع تحليل فوري للصفقة (يرسله البوت في تلقرام)
     return build_trade_analysis(trade)
 
@@ -115,6 +164,7 @@ def build_trade_analysis(t) -> str:
 def log_filtered():
     global today_filtered
     today_filtered += 1
+    _save_state()
 
 
 # ─── محرك التحليل ────────────────────────────────────────────
@@ -296,6 +346,7 @@ def send_summary(send_func) -> bool:
         _open_index = {}
         summary_sent = True
         summary_date = date.today()
+        _save_state()
         return True
     except Exception as e:
         print(f"SUMMARY ERROR: {e}", flush=True)
@@ -326,3 +377,22 @@ def close_all_open(get_price_func):
                 log_result(stock, "open_close", px)
         except Exception as e:
             print(f"close_all_open {stock}: {e}", flush=True)
+
+
+def _reset_if_new_day():
+    """لو الملف المحفوظ من يوم سابق (وأُرسل ملخصه)، نبدأ يوم جديد نظيف."""
+    global today_trades, today_filtered, summary_sent, summary_date, _open_index
+    today = date.today()
+    # إذا التاريخ المحفوظ قديم والملخص اترسل، نظّف لليوم الجديد
+    if summary_date is not None and summary_date != today and summary_sent:
+        today_trades = []
+        today_filtered = 0
+        _open_index = {}
+        summary_sent = False
+        summary_date = None
+        _save_state()
+
+
+# ─── تحميل الحالة المحفوظة عند بدء البوت ─────────────────────
+_load_state()
+_reset_if_new_day()
