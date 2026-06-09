@@ -692,6 +692,9 @@ while True:
                 log.info(f"{stock}: SKIP cooldown"); del result; gc.collect(); continue
 
             claude_verdict = claude_analyze(result)
+            if "تجاهل" in claude_verdict:
+                log.info(f"{stock}: SKIP claude")
+                del result; gc.collect(); continue
             close1  = result.pop("close1")
             volume1 = result.pop("volume1")
             msg = build_alert_message(result, claude_verdict)
