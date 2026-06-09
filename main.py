@@ -675,6 +675,7 @@ while True:
             if real_score < MIN_REAL_SCORE:     log.info(f"{stock}: SKIP real={real_score}"); del result; gc.collect(); continue
             if score < MIN_SCORE:               log.info(f"{stock}: SKIP score={score}"); del result; gc.collect(); continue
             if result["rel_vol"] < 1.5:         log.info(f"{stock}: SKIP vol={result['rel_vol']}"); del result; gc.collect(); continue
+            if result["levels"]["rr"] < 1.5:    log.info(f"{stock}: SKIP rr={result['levels']['rr']}"); del result; gc.collect(); continue
 
             snap          = last_alert_snapshot.get(stock, {})
             normal_ok     = now_time - last_time >= ALERT_COOLDOWN
