@@ -695,18 +695,18 @@ while True:
             if not (normal_ok or continuation or elite_upgrade or macd_new or exp_new):
                 log.info(f"{stock}: SKIP cooldown"); del result; gc.collect(); continue
 
-           claude_verdict = claude_analyze(result)
+            claude_verdict = claude_analyze(result)
 
-           if claude_verdict is None:
+            if claude_verdict is None:
                         log.info(f"{stock}: SKIP — Claude لم يرد")
                         del result; gc.collect()
                         continue
 
-           close1  = result.pop("close1")
-           volume1 = result.pop("volume1")
-           msg = build_alert_message(result, claude_verdict)
-           send(msg)
-           log.info(f"ALERT: {stock} score={score} real={real_score}/9 {result['quality_label']}")
+            close1  = result.pop("close1")
+            volume1 = result.pop("volume1")
+            msg = build_alert_message(result, claude_verdict)
+            send(msg)
+            log.info(f"ALERT: {stock} score={score} real={real_score}/9 {result['quality_label']}")
 
             # إضافة للمتابعة
             followup_tracking[stock] = {
