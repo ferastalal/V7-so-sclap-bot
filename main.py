@@ -94,11 +94,11 @@ def send(msg: str):
 
 
 # ─── CLAUDE AI ──────────────────────────────────────────────
-def claude_analyze(r: dict) -> str:
-    try:
-        if not CLAUDE_KEY:
-            return "⚠️ No Key"    
-        prompt = f"""أنت محلل سكالبينج خبير. حلل هذه الفرصة في سطرين فقط باللغة العربية:
+def claude_analyze(r: dict):
+    if not CLAUDE_KEY:
+        return "⚠️ No Key"
+
+    prompt = f"""أنت محلل سكالبينج خبير. حلل هذه الفرصة في سطرين فقط باللغة العربية:
 
 السهم: {r['stock']} | السعر: {r['price']:.2f}
 النمط: {r['pattern']} | الجودة: {r['quality_label']}
@@ -112,28 +112,32 @@ R:R={r['levels']['rr']}x | MACD Cross: {r['macd_cross']}
 ⚠️ انتظر - سبب
 ❌ تجاهل - سبب"""
 
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": CLAUDE_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 250,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=15
-        )
-        if response.status_code == 200:
-            return response.json()["content"][0]["text"].strip()
-        log.error(f"Claude API error: {response.status_code} - {response.text[:200]}")
-        return f"API error {response.status_code}"
-    except Exception as e:
-        log.error(f"Claude error: {e}")
-        return f"خطأ: {e}"
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": CLAUDE_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 250,
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json()["content"][0]["text"].strip()
+            log.error(f"Claude API error: {response.status_code} - {response.text[:200]}")
+        except Exception as e:
+            log.error(f"Claude error (attempt {attempt+1}/3): {e}")
 
+        if attempt < 2:
+            time.sleep(2)
+
+    return None
 
 # ─── صياد الانفجارات ────────────────────────────────────────
 def detect_explosion(close1, volume1, high1, low1) -> dict:
@@ -691,15 +695,18 @@ while True:
             if not (normal_ok or continuation or elite_upgrade or macd_new or exp_new):
                 log.info(f"{stock}: SKIP cooldown"); del result; gc.collect(); continue
 
-            claude_verdict = claude_analyze(result)
-            if "تجاهل" in claude_verdict:
-                log.info(f"{stock}: SKIP claude")
-                del result; gc.collect(); continue
-            close1  = result.pop("close1")
-            volume1 = result.pop("volume1")
-            msg = build_alert_message(result, claude_verdict)
-            send(msg)
-            log.info(f"ALERT: {stock} score={score} real={real_score}/9 {result['quality_label']}")
+           claude_verdict = claude_analyze(result)
+
+           if claude_verdict is None:
+                        log.info(f"{stock}: SKIP — Claude لم يرد")
+                        del result; gc.collect()
+                        continue
+
+           close1  = result.pop("close1")
+           volume1 = result.pop("volume1")
+           msg = build_alert_message(result, claude_verdict)
+           send(msg)
+           log.info(f"ALERT: {stock} score={score} real={real_score}/9 {result['quality_label']}")
 
             # إضافة للمتابعة
             followup_tracking[stock] = {
