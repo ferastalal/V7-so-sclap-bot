@@ -395,7 +395,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
     else: warnings.append("قوة نسبية ضعيفة")
     if rel_volume >= rvmin: score += 1
     else: warnings.append("حجم ضعيف")
-    if adx >= 18: score += 1
+    if adx >= 21: score += 1
     else: warnings.append("ADX ضعيف")
     if 0.001 <= atr_pct <= 0.025: score += 1
     else: warnings.append("ATR خارج النطاق")
