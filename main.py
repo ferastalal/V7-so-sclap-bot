@@ -393,7 +393,7 @@ def real_quality_filter(move_1m, move_3m, move_5m, rel_strength,
     else: warnings.append("زخم 5د ضعيف")
     if rel_strength > 0.001: score += 1
     else: warnings.append("قوة نسبية ضعيفة")
-    if rel_volume >= rvmin: score += 1
+    if rvmin <= rel_volume <= 3.0: score += 1
     else: warnings.append("حجم ضعيف")
     if adx >= 21: score += 1
     else: warnings.append("ADX ضعيف")
