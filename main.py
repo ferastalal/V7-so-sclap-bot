@@ -339,7 +339,23 @@ def download(stock: str, period: str, interval: str) -> pd.DataFrame:
         return df
     except Exception as e:
         log.error(f"Download error {stock}: {e}")
-        return pd.DataFrame()    
+        return pd.DataFrame()  
+
+def market_is_healthy():
+    try:
+        df = download("QQQ", "1d", "5m")
+        if df is None or df.empty:
+            return True
+        close = df["Close"].squeeze()
+        price_now = float(close.iloc[-1])
+        open_today = float(close.iloc[0])
+        change = (price_now - open_today) / open_today
+        return change >= -0.005
+    except Exception as e:
+        log.error(f"market check error: {e}")
+        return True
+
+
 def calc_vwap(df):
     try:
         ny = pytz.timezone("America/New_York")
@@ -665,6 +681,9 @@ while True:
                 log.error(f"Followup {stock}: {e}")
 
         # تحليل الأسهم
+        if not market_is_healthy():
+            log.info(f"السوق ضعيف - تخطي التداول | {now_ksa}")
+            time.sleep(30); gc.collect(); continue
         for stock in WATCHLIST:
             time.sleep(2)  # منع Rate Limit
             result = analyze(stock)
